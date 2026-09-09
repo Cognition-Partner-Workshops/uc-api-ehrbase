@@ -279,6 +279,12 @@ public class EhrServiceImp implements EhrService {
         }
     }
 
+    @Override
+    public boolean isQueryable(UUID ehrId) {
+        return Optional.ofNullable(ehrRepository.fetchIsQueryable(ehrId))
+                .orElseThrow(() -> new ObjectNotFoundException("ehr", "No EHR found with given ID: " + ehrId));
+    }
+
     private static ObjectNotFoundException ehrNotFoundException(UUID ehrId) {
         return new ObjectNotFoundException("EHR", String.format("EHR with id %s not found", ehrId));
     }

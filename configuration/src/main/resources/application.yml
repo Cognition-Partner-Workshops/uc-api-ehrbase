@@ -256,6 +256,37 @@ validation:
     #       - 'https://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets'
     #       - 'http://snomed.info/sct'
 
+# Optional FHIR billing ExplanationOfBenefit search service.
+# ehrbase:
+#   fhir:
+#     billing:
+#       enabled: false
+#       context-path: /ehrbase/rest/fhir/r4
+#       subject-namespace: patients
+#       default-count: 20
+#       max-count: 100
+#
+#       # Required aliases:
+#       # eob_id, status, type_code, type_system, use, created,
+#       # insurer_display, provider_display, outcome, coverage_reference
+#       # Optional aliases:
+#       # diagnosis_code, diagnosis_system, procedure_code, procedure_system,
+#       # item_code, item_system, item_net, item_currency, billable_start, billable_end
+#       eob-aql: >
+#         SELECT
+#           e/ehr_id/value AS eob_id,
+#           e/content[openEHR-EHR-SECTION.claim.v1]/items[at0001]/value/value AS status,
+#           e/content[openEHR-EHR-SECTION.claim.v1]/items[at0002]/value/defining_code/code_string AS type_code,
+#           e/content[openEHR-EHR-SECTION.claim.v1]/items[at0002]/value/defining_code/terminology_id/value AS type_system,
+#           e/content[openEHR-EHR-SECTION.claim.v1]/items[at0003]/value/value AS use,
+#           e/context/start_time/value AS created,
+#           e/content[openEHR-EHR-SECTION.claim.v1]/items[at0004]/value/value AS insurer_display,
+#           e/content[openEHR-EHR-SECTION.claim.v1]/items[at0005]/value/value AS provider_display,
+#           e/content[openEHR-EHR-SECTION.claim.v1]/items[at0006]/value/value AS outcome,
+#           e/content[openEHR-EHR-SECTION.claim.v1]/items[at0007]/value/value AS coverage_reference
+#         FROM EHR e
+#         WHERE e/ehr_id/value = $ehr_id
+
 # SSL Properties (used by Spring WebClient and Apache HTTP Client)
 client:
   ssl:

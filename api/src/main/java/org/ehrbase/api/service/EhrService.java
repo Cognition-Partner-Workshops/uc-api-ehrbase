@@ -122,6 +122,15 @@ public interface EhrService {
     boolean hasEhr(UUID ehrId);
 
     /**
+     * Returns the EHR_STATUS.is_queryable flag.
+     *
+     * @param ehrId EHR ID to check
+     * @return whether the EHR is queryable
+     * @throws ObjectNotFoundException if no EHR is found
+     */
+    boolean isQueryable(UUID ehrId);
+
+    /**
      * Gets version container EhrStatus associated with given EHR.
      *
      * @param ehrId Given EHR ID

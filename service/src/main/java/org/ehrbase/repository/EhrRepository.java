@@ -66,6 +66,7 @@ public class EhrRepository
                 EhrStatusVersionRecord, EhrStatusDataRecord, EhrStatusVersionHistoryRecord, EhrStatus, Void> {
 
     public static final String[] IS_MODIFIABLE_JSON_PATH = RmAttributeAlias.rmToJsonPathParts("is_modifiable");
+    public static final String[] IS_QUERYABLE_JSON_PATH = RmAttributeAlias.rmToJsonPathParts("is_queryable");
     public static final String[] SUBJECT_ID_JSON_PATH =
             RmAttributeAlias.rmToJsonPathParts("subject/external_ref/id/value");
     public static final String[] SUBJECT_NAMESPACE_JSON_PATH =
@@ -125,6 +126,17 @@ public class EhrRepository
     public Boolean fetchIsModifiable(UUID ehrId) {
         Table<EhrStatusDataRecord> dataHead = tables.dataHead();
         return context.select(jsonDataField(dataHead, IS_MODIFIABLE_JSON_PATH).cast(Boolean.class))
+                .from(dataHead)
+                .where(singleEhrStatusCondition(ehrId).apply(dataHead))
+                .and(dataRootCondition(dataHead))
+                .fetchOptional()
+                .map(Record1::value1)
+                .orElse(null);
+    }
+
+    public Boolean fetchIsQueryable(UUID ehrId) {
+        Table<EhrStatusDataRecord> dataHead = tables.dataHead();
+        return context.select(jsonDataField(dataHead, IS_QUERYABLE_JSON_PATH).cast(Boolean.class))
                 .from(dataHead)
                 .where(singleEhrStatusCondition(ehrId).apply(dataHead))
                 .and(dataRootCondition(dataHead))
