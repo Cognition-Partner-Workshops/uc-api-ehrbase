@@ -17,7 +17,9 @@
  */
 package org.ehrbase.configuration.config.validation;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
@@ -34,6 +36,8 @@ public class ExternalValidationProperties {
     private boolean failOnError = false;
 
     private final Map<String, Provider> provider = new HashMap<>();
+
+    private final Map<String, BillingProfile> billingProfiles = new HashMap<>();
 
     public boolean isEnabled() {
         return enabled;
@@ -61,6 +65,10 @@ public class ExternalValidationProperties {
 
     public Map<String, Provider> getProvider() {
         return provider;
+    }
+
+    public Map<String, BillingProfile> getBillingProfiles() {
+        return billingProfiles;
     }
 
     public enum ProviderType {
@@ -97,6 +105,55 @@ public class ExternalValidationProperties {
 
         public void setUrl(String url) {
             this.url = url;
+        }
+    }
+
+    public static class BillingProfile {
+
+        private boolean enabled = true;
+
+        private String provider;
+
+        private final List<String> templateIds = new ArrayList<>();
+
+        private final List<String> codeSystems = new ArrayList<>();
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getProvider() {
+            return provider;
+        }
+
+        public void setProvider(String provider) {
+            this.provider = provider;
+        }
+
+        public List<String> getTemplateIds() {
+            return templateIds;
+        }
+
+        public void setTemplateIds(List<String> templateIds) {
+            this.templateIds.clear();
+            if (templateIds != null) {
+                this.templateIds.addAll(templateIds);
+            }
+        }
+
+        public List<String> getCodeSystems() {
+            return codeSystems;
+        }
+
+        public void setCodeSystems(List<String> codeSystems) {
+            this.codeSystems.clear();
+            if (codeSystems != null) {
+                this.codeSystems.addAll(codeSystems);
+            }
         }
     }
 }

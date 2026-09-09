@@ -22,13 +22,17 @@ import static java.lang.String.format;
 import com.google.common.net.HttpHeaders;
 import com.jayway.jsonpath.DocumentContext;
 import com.jayway.jsonpath.JsonPath;
+import com.jayway.jsonpath.PathNotFoundException;
 import com.nedap.archie.rm.datatypes.CodePhrase;
 import com.nedap.archie.rm.datavalues.DvCodedText;
 import com.nedap.archie.rm.support.identification.TerminologyId;
 import java.text.MessageFormat;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -55,6 +59,7 @@ import org.springframework.web.reactive.function.client.WebClient.RequestBodyUri
 import org.springframework.web.reactive.function.client.WebClientException;
 import org.springframework.web.util.UriComponents;
 import org.springframework.web.util.UriComponentsBuilder;
+import org.springframework.web.util.UriUtils;
 import reactor.core.publisher.Mono;
 import reactor.netty.http.client.HttpClient;
 
@@ -191,6 +196,54 @@ public class FhirTerminologyValidation implements ExternalTerminologyValidation 
         } else {
             throw new IllegalStateException();
         }
+    }
+
+    /**
+     * Validates each distinct (system, code) against CodeSystem/$validate-code. Returns one violation per invalid
+     * code.
+     */
+    public List<ConstraintViolation> validateCodes(Collection<CodePhrase> codePhrases) {
+        Map<String, CodePhrase> distinctCodes = new LinkedHashMap<>();
+        for (CodePhrase codePhrase : codePhrases) {
+            String system = codePhrase.getTerminologyId().getValue();
+            String code = codePhrase.getCodeString();
+            distinctCodes.putIfAbsent(system + "\u0000" + code, codePhrase);
+        }
+
+        List<ConstraintViolation> violations = new ArrayList<>();
+        for (CodePhrase codePhrase : distinctCodes.values()) {
+            String system = codePhrase.getTerminologyId().getValue();
+            String code = codePhrase.getCodeString();
+            String uri = baseUrl + "/CodeSystem/$validate-code?url="
+                    + UriUtils.encodeQueryParam(system, java.nio.charset.StandardCharsets.UTF_8)
+                    + "&code="
+                    + UriUtils.encodeQueryParam(code, java.nio.charset.StandardCharsets.UTF_8);
+            try {
+                DocumentContext context = internalGet(uri);
+                if (!context.read("$.parameter[0].valueBoolean", Boolean.class)) {
+                    String message;
+                    try {
+                        message = context.read("$.parameter[1].valueString", String.class);
+                    } catch (PathNotFoundException e) {
+                        message = "code not found";
+                    }
+                    violations.add(new ConstraintViolation(
+                            "Invalid billing code '%s' in system '%s': %s".formatted(code, system, message)));
+                }
+            } catch (WebClientException e) {
+                if (failOnError) {
+                    throw new ExternalTerminologyValidationException(
+                            "An error occurred while validating billing code '%s' in system '%s'".formatted(code, system),
+                            e);
+                }
+                    LOG.warn(
+                            "An error occurred while validating billing code '{}' in system '{}': {}",
+                            code,
+                            system,
+                            e.getMessage());
+            }
+        }
+        return violations;
     }
 
     static String guaranteePrefix(String prefix, String str) {
