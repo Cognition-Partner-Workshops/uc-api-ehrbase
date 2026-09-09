@@ -29,6 +29,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -41,7 +42,7 @@ public class BillingCodeValidator {
     private final Map<String, BillingValidationProfile> profilesByTemplateId;
 
     public BillingCodeValidator(Collection<BillingValidationProfile> profiles) {
-        Map<String, BillingValidationProfile> byTemplateId = new java.util.LinkedHashMap<>();
+        Map<String, BillingValidationProfile> byTemplateId = new LinkedHashMap<>();
         for (BillingValidationProfile profile : profiles) {
             for (String templateId : profile.templateIds()) {
                 BillingValidationProfile previous = byTemplateId.putIfAbsent(templateId, profile);
@@ -70,7 +71,8 @@ public class BillingCodeValidator {
             return;
         }
 
-        List<ConstraintViolation> violations = profile.get().terminologyValidation().validateCodes(codes);
+        List<ConstraintViolation> violations =
+                profile.get().terminologyValidation().validateCodes(codes);
         if (!violations.isEmpty()) {
             throw new ConstraintViolationException(violations);
         }

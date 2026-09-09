@@ -20,17 +20,17 @@ package org.ehrbase.service.validation;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpServer;
 import com.nedap.archie.rm.composition.Composition;
 import com.nedap.archie.rm.composition.Evaluation;
 import com.nedap.archie.rm.datastructures.Element;
-import com.nedap.archie.rm.datastructures.ItemTree;
 import com.nedap.archie.rm.datastructures.Item;
+import com.nedap.archie.rm.datastructures.ItemTree;
 import com.nedap.archie.rm.datatypes.CodePhrase;
 import com.nedap.archie.rm.datavalues.DvCodedText;
 import com.nedap.archie.rm.datavalues.DvText;
 import com.nedap.archie.rm.support.identification.TerminologyId;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -66,10 +66,13 @@ class BillingTerminologyValidationIT {
 
     @Test
     void validatesCodesAgainstFhirServer() {
-        FhirTerminologyValidation terminologyValidation =
-                new FhirTerminologyValidation("http://localhost:" + server.getAddress().getPort(), true, WebClient.create());
+        FhirTerminologyValidation terminologyValidation = new FhirTerminologyValidation(
+                "http://localhost:" + server.getAddress().getPort(), true, WebClient.create());
         BillingCodeValidator validator = new BillingCodeValidator(List.of(new BillingValidationProfile(
-                "claims", java.util.Set.of("billing.claim.v1"), java.util.Set.of(ICD10, CPT, HCPCS), terminologyValidation)));
+                "claims",
+                java.util.Set.of("billing.claim.v1"),
+                java.util.Set.of(ICD10, CPT, HCPCS),
+                terminologyValidation)));
 
         validator.validate(
                 "billing.claim.v1",
@@ -87,8 +90,8 @@ class BillingTerminologyValidationIT {
 
     @Test
     void invalidCodeIncludesSystemAndTemplateMismatchDoesNotRequest() {
-        FhirTerminologyValidation terminologyValidation =
-                new FhirTerminologyValidation("http://localhost:" + server.getAddress().getPort(), true, WebClient.create());
+        FhirTerminologyValidation terminologyValidation = new FhirTerminologyValidation(
+                "http://localhost:" + server.getAddress().getPort(), true, WebClient.create());
         BillingCodeValidator validator = new BillingCodeValidator(List.of(new BillingValidationProfile(
                 "claims", java.util.Set.of("billing.claim.v1"), java.util.Set.of(ICD10), terminologyValidation)));
 

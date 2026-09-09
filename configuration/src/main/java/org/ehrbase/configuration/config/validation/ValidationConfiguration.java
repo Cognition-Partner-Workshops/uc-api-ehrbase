@@ -18,6 +18,7 @@
 package org.ehrbase.configuration.config.validation;
 
 import com.jayway.jsonpath.DocumentContext;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -179,7 +180,7 @@ public class ValidationConfiguration {
                 ExternalValidationProperties properties,
                 @Qualifier("externalTerminologyValidations")
                         Map<String, ExternalTerminologyValidation> externalTerminologyValidations) {
-            List<BillingValidationProfile> profiles = new java.util.ArrayList<>();
+            List<BillingValidationProfile> profiles = new ArrayList<>();
             for (Map.Entry<String, ExternalValidationProperties.BillingProfile> entry :
                     properties.getBillingProfiles().entrySet()) {
                 String profileName = entry.getKey();
@@ -194,11 +195,13 @@ public class ValidationConfiguration {
                 if (profile.getProvider() != null) {
                     validation = externalTerminologyValidations.get(profile.getProvider());
                     if (validation == null) {
-                        throw new IllegalStateException("Billing profile '%s' references unknown terminology provider '%s'"
-                                .formatted(profileName, profile.getProvider()));
+                        throw new IllegalStateException(
+                                "Billing profile '%s' references unknown terminology provider '%s'"
+                                        .formatted(profileName, profile.getProvider()));
                     }
                 } else if (externalTerminologyValidations.size() == 1) {
-                    validation = externalTerminologyValidations.values().iterator().next();
+                    validation =
+                            externalTerminologyValidations.values().iterator().next();
                 } else {
                     throw new IllegalStateException(
                             "Billing profile '%s' must specify an explicit terminology provider when several providers are configured"

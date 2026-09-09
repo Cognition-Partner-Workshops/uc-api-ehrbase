@@ -20,14 +20,19 @@ package org.ehrbase.service.validation;
 import java.util.Set;
 
 public record BillingValidationProfile(
-        String name, Set<String> templateIds, Set<String> codeSystems, FhirTerminologyValidation terminologyValidation) {
+        String name,
+        Set<String> templateIds,
+        Set<String> codeSystems,
+        FhirTerminologyValidation terminologyValidation) {
 
     public BillingValidationProfile {
         if (templateIds == null || templateIds.isEmpty()) {
-            throw new IllegalArgumentException("Billing validation profile '%s' must define template IDs".formatted(name));
+            throw new IllegalArgumentException(
+                    "Billing validation profile '%s' must define template IDs".formatted(name));
         }
         if (codeSystems == null || codeSystems.isEmpty()) {
-            throw new IllegalArgumentException("Billing validation profile '%s' must define code systems".formatted(name));
+            throw new IllegalArgumentException(
+                    "Billing validation profile '%s' must define code systems".formatted(name));
         }
         if (terminologyValidation == null) {
             throw new IllegalArgumentException(

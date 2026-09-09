@@ -26,6 +26,7 @@ import com.jayway.jsonpath.PathNotFoundException;
 import com.nedap.archie.rm.datatypes.CodePhrase;
 import com.nedap.archie.rm.datavalues.DvCodedText;
 import com.nedap.archie.rm.support.identification.TerminologyId;
+import java.nio.charset.StandardCharsets;
 import java.text.MessageFormat;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -215,9 +216,9 @@ public class FhirTerminologyValidation implements ExternalTerminologyValidation 
             String system = codePhrase.getTerminologyId().getValue();
             String code = codePhrase.getCodeString();
             String uri = baseUrl + "/CodeSystem/$validate-code?url="
-                    + UriUtils.encodeQueryParam(system, java.nio.charset.StandardCharsets.UTF_8)
+                    + UriUtils.encodeQueryParam(system, StandardCharsets.UTF_8)
                     + "&code="
-                    + UriUtils.encodeQueryParam(code, java.nio.charset.StandardCharsets.UTF_8);
+                    + UriUtils.encodeQueryParam(code, StandardCharsets.UTF_8);
             try {
                 DocumentContext context = internalGet(uri);
                 if (!context.read("$.parameter[0].valueBoolean", Boolean.class)) {
@@ -233,14 +234,15 @@ public class FhirTerminologyValidation implements ExternalTerminologyValidation 
             } catch (WebClientException e) {
                 if (failOnError) {
                     throw new ExternalTerminologyValidationException(
-                            "An error occurred while validating billing code '%s' in system '%s'".formatted(code, system),
+                            "An error occurred while validating billing code '%s' in system '%s'"
+                                    .formatted(code, system),
                             e);
                 }
-                    LOG.warn(
-                            "An error occurred while validating billing code '{}' in system '{}': {}",
-                            code,
-                            system,
-                            e.getMessage());
+                LOG.warn(
+                        "An error occurred while validating billing code '{}' in system '{}': {}",
+                        code,
+                        system,
+                        e.getMessage());
             }
         }
         return violations;
