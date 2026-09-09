@@ -21,6 +21,7 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.ehrbase.test.fixtures.EhrStatusFixture.ehrStatus;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
@@ -79,6 +80,7 @@ import org.ehrbase.openehr.sdk.validation.terminology.ExternalTerminologyValidat
 import org.ehrbase.openehr.sdk.validation.terminology.TerminologyParam;
 import org.ehrbase.openehr.sdk.webtemplate.model.WebTemplate;
 import org.ehrbase.openehr.sdk.webtemplate.parser.OPTParser;
+import org.ehrbase.service.validation.BillingCodeValidator;
 import org.ehrbase.service.validation.ValidationProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -95,6 +97,7 @@ class ValidationServiceTest {
     private final ValidationProperties serverConfig = new ValidationProperties(true, true, true);
 
     private final ObjectProvider<ExternalTerminologyValidation> objectProvider = mock();
+    private final ObjectProvider<BillingCodeValidator> billingCodeValidatorProvider = mock();
 
     private static class NopTerminologyValidation implements ExternalTerminologyValidation {
 
@@ -114,7 +117,7 @@ class ValidationServiceTest {
     }
 
     private final ValidationService spyService = spy(new ValidationServiceImp(
-            templateService, new TerminologyServiceImp(), serverConfig, objectProvider, false));
+            templateService, new TerminologyServiceImp(), serverConfig, objectProvider, billingCodeValidatorProvider, false));
 
     @BeforeEach
     void setUp() {
@@ -259,6 +262,40 @@ class ValidationServiceTest {
         WebTemplate webTemplate = loadWebTemplate(templateData);
 
         when(templateService.getInternalTemplate(templateID)).thenReturn(webTemplate);
+        service().check(composition);
+    }
+
+    @Test
+    void checkCompositionInvokesBillingValidatorAfterRmValidation() {
+        Composition composition = loadComposition(CompositionTestDataCanonicalJson.ALL_TYPES);
+        composition.setUid(new ObjectVersionId("85379aa8-a16a-4d5b-97ad-242880066803", "test-system", "42"));
+        String templateID = Objects.requireNonNull(composition.getArchetypeDetails().getTemplateId()).getValue();
+        WebTemplate webTemplate =
+                loadWebTemplate(OperationalTemplateTestData.findByTemplateId(templateID));
+        when(templateService.getInternalTemplate(templateID)).thenReturn(webTemplate);
+
+        BillingCodeValidator billingValidator = mock();
+        doAnswer(invocation -> {
+                    Consumer<BillingCodeValidator> callback = invocation.getArgument(0);
+                    callback.accept(billingValidator);
+                    return null;
+                })
+                .when(billingCodeValidatorProvider)
+                .ifAvailable(Mockito.any());
+
+        service().check(composition);
+
+        Mockito.verify(billingValidator).validate(templateID, composition);
+    }
+
+    @Test
+    void checkCompositionWithoutBillingValidatorProviderKeepsValidCompositionBehavior() {
+        Composition composition = loadComposition(CompositionTestDataCanonicalJson.ALL_TYPES);
+        composition.setUid(new ObjectVersionId("85379aa8-a16a-4d5b-97ad-242880066803", "test-system", "42"));
+        String templateID = Objects.requireNonNull(composition.getArchetypeDetails().getTemplateId()).getValue();
+        when(templateService.getInternalTemplate(templateID))
+                .thenReturn(loadWebTemplate(OperationalTemplateTestData.findByTemplateId(templateID)));
+
         service().check(composition);
     }
 

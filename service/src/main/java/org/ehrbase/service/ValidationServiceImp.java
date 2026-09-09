@@ -56,6 +56,7 @@ import org.ehrbase.openehr.sdk.validation.terminology.ExternalTerminologyValidat
 import org.ehrbase.openehr.sdk.validation.terminology.ItemStructureVisitor;
 import org.ehrbase.openehr.sdk.validation.webtemplate.FastRMObjectValidator;
 import org.ehrbase.openehr.sdk.webtemplate.model.WebTemplate;
+import org.ehrbase.service.validation.BillingCodeValidator;
 import org.ehrbase.service.validation.ValidationProperties;
 import org.ehrbase.util.FolderUtils;
 import org.slf4j.Logger;
@@ -78,6 +79,7 @@ public class ValidationServiceImp implements ValidationService {
 
     private final TerminologyService terminologyService;
     private final boolean folderValidationEnabled;
+    private final ObjectProvider<BillingCodeValidator> billingCodeValidatorProvider;
 
     private final ThreadLocal<LocatableValidator> locatableValidator;
 
@@ -88,10 +90,12 @@ public class ValidationServiceImp implements ValidationService {
             TerminologyService terminologyService,
             ValidationProperties validationProperties,
             ObjectProvider<ExternalTerminologyValidation> objectProvider,
+            ObjectProvider<BillingCodeValidator> billingCodeValidatorProvider,
             @Value("${cache.validation.useSharedRMPathQueryCache:true}") boolean sharedAqlQueryCache) {
         this.templateService = templateService;
         this.terminologyService = terminologyService;
         this.folderValidationEnabled = validationProperties.validateFolders();
+        this.billingCodeValidatorProvider = billingCodeValidatorProvider;
 
         boolean disableStrictValidation = !validationProperties.validateRmConstraints();
         if (disableStrictValidation) {
@@ -187,6 +191,7 @@ public class ValidationServiceImp implements ValidationService {
         } catch (ReflectiveOperationException e) {
             throw new InternalServerException(e);
         }
+        billingCodeValidatorProvider.ifAvailable(v -> v.validate(templateID, composition));
     }
 
     private static void compositionMandatoryProperty(Object value, String attribute) {
