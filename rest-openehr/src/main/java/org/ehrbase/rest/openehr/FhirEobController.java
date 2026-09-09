@@ -42,8 +42,8 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 @RestController
 @ConditionalOnProperty(prefix = "ehrbase.fhir.billing", name = "enabled", havingValue = "true")
-@ConditionalOnMissingBean(name = "fhirEobController")
-@RequestMapping(path = "${ehrbase.fhir.billing.context-path:/ehrbase/rest/fhir/r4}/ExplanationOfBenefit")
+@ConditionalOnMissingBean(name = "primaryFhirEobController")
+@RequestMapping(path = "${ehrbase.fhir.billing.context-path:/rest/fhir/r4}/ExplanationOfBenefit")
 public class FhirEobController extends BaseController implements FhirEobApiSpecification {
 
     public static final String FHIR_JSON = "application/fhir+json";

@@ -23,7 +23,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 @ConfigurationProperties(prefix = "ehrbase.fhir.billing")
 public record FhirBillingProperties(
         @DefaultValue("false") boolean enabled,
-        @DefaultValue("/ehrbase/rest/fhir/r4") String contextPath,
+        @DefaultValue("/rest/fhir/r4") String contextPath,
         String subjectNamespace,
         String eobAql,
         @DefaultValue("20") int defaultCount,

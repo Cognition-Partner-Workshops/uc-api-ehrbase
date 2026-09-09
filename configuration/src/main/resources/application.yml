@@ -261,7 +261,7 @@ validation:
 #   fhir:
 #     billing:
 #       enabled: false
-#       context-path: /ehrbase/rest/fhir/r4
+#       context-path: /rest/fhir/r4
 #       subject-namespace: patients
 #       default-count: 20
 #       max-count: 100

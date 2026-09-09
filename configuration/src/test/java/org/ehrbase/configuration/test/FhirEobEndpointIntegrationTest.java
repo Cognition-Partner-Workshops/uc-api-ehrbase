@@ -90,7 +90,7 @@ class FhirEobEndpointIntegrationTest {
 
         @Test
         void unauthenticatedRequestIsRejected() throws Exception {
-            mockMvc.perform(get("/ehrbase/rest/fhir/r4/ExplanationOfBenefit")
+            mockMvc.perform(get("/rest/fhir/r4/ExplanationOfBenefit")
                             .param("patient", "Patient/p1")
                             .accept("application/fhir+json"))
                     .andExpect(result -> org.assertj.core.api.Assertions.assertThat(
@@ -103,7 +103,7 @@ class FhirEobEndpointIntegrationTest {
             when(ehrService.findBySubject("p1", "test")).thenReturn(Optional.of(EHR_ID));
             when(ehrService.isQueryable(EHR_ID)).thenReturn(false);
 
-            mockMvc.perform(get("/ehrbase/rest/fhir/r4/ExplanationOfBenefit")
+            mockMvc.perform(get("/rest/fhir/r4/ExplanationOfBenefit")
                             .with(httpBasic("ehrbase-user", "SuperSecretPassword"))
                             .param("patient", "Patient/p1")
                             .accept("application/fhir+json"))
@@ -118,7 +118,7 @@ class FhirEobEndpointIntegrationTest {
 
         @Test
         void xmlAcceptIsNotAcceptable() throws Exception {
-            mockMvc.perform(get("/ehrbase/rest/fhir/r4/ExplanationOfBenefit")
+            mockMvc.perform(get("/rest/fhir/r4/ExplanationOfBenefit")
                             .with(httpBasic("ehrbase-user", "SuperSecretPassword"))
                             .param("patient", "Patient/p1")
                             .accept(MediaType.APPLICATION_XML))
@@ -127,7 +127,7 @@ class FhirEobEndpointIntegrationTest {
 
         @Test
         void barePatientIdIsBadRequest() throws Exception {
-            mockMvc.perform(get("/ehrbase/rest/fhir/r4/ExplanationOfBenefit")
+            mockMvc.perform(get("/rest/fhir/r4/ExplanationOfBenefit")
                             .with(httpBasic("ehrbase-user", "SuperSecretPassword"))
                             .param("patient", "p1")
                             .accept("application/fhir+json"))
@@ -153,7 +153,7 @@ class FhirEobEndpointIntegrationTest {
 
         @Test
         void endpointIsNotFoundWhenBillingIsDisabled() throws Exception {
-            mockMvc.perform(get("/ehrbase/rest/fhir/r4/ExplanationOfBenefit")
+            mockMvc.perform(get("/rest/fhir/r4/ExplanationOfBenefit")
                             .with(httpBasic("ehrbase-user", "SuperSecretPassword"))
                             .param("patient", "Patient/p1")
                             .accept("application/fhir+json"))
