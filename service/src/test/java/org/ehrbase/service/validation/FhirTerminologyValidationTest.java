@@ -32,8 +32,8 @@ import ca.uhn.fhir.context.FhirContext;
 import com.jayway.jsonpath.DocumentContext;
 import com.jayway.jsonpath.JsonPath;
 import com.jayway.jsonpath.internal.JsonContext;
-import com.nedap.archie.rm.datavalues.DvCodedText;
 import com.nedap.archie.rm.datatypes.CodePhrase;
+import com.nedap.archie.rm.datavalues.DvCodedText;
 import com.nedap.archie.rm.support.identification.TerminologyId;
 import java.io.IOException;
 import java.net.URI;
@@ -43,9 +43,9 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import net.java.quickcheck.generator.PrimitiveGenerators;
-import org.ehrbase.openehr.sdk.validation.terminology.TerminologyParam;
 import org.ehrbase.openehr.sdk.validation.ConstraintViolation;
 import org.ehrbase.openehr.sdk.validation.terminology.ExternalTerminologyValidationException;
+import org.ehrbase.openehr.sdk.validation.terminology.TerminologyParam;
 import org.ehrbase.service.validation.FhirTerminologyValidation.ValueSetConverter;
 import org.hl7.fhir.r4.model.ValueSet;
 import org.hl7.fhir.r4.model.ValueSet.ValueSetExpansionComponent;
@@ -64,9 +64,7 @@ class FhirTerminologyValidationTest {
         FhirTerminologyValidation validation = spy(new FhirTerminologyValidation("http://terminology.local"));
         doReturn(JsonPath.parse("""
                 {"parameter":[{"valueBoolean":true}]}
-                """))
-                .when(validation)
-                .internalGet(Mockito.anyString());
+                """)).when(validation).internalGet(Mockito.anyString());
 
         List<CodePhrase> codes = List.of(
                 new CodePhrase(new TerminologyId("http://hl7.org/fhir/sid/icd-10-cm"), "A 01"),
@@ -75,8 +73,9 @@ class FhirTerminologyValidationTest {
 
         assertThat(validation.validateCodes(codes)).isEmpty();
         verify(validation, times(2)).internalGet(Mockito.anyString());
-        verify(validation).internalGet(
-                "http://terminology.local/CodeSystem/$validate-code?url=http://hl7.org/fhir/sid/icd-10-cm&code=A%2001");
+        verify(validation)
+                .internalGet(
+                        "http://terminology.local/CodeSystem/$validate-code?url=http://hl7.org/fhir/sid/icd-10-cm&code=A%2001");
     }
 
     @Test
@@ -84,12 +83,10 @@ class FhirTerminologyValidationTest {
         FhirTerminologyValidation validation = spy(new FhirTerminologyValidation("http://terminology.local"));
         doReturn(JsonPath.parse("""
                 {"parameter":[{"valueBoolean":false},{"valueString":"not recognized"}]}
-                """))
-                .when(validation)
-                .internalGet(Mockito.anyString());
+                """)).when(validation).internalGet(Mockito.anyString());
 
-        List<ConstraintViolation> violations = validation.validateCodes(List.of(
-                new CodePhrase(new TerminologyId("http://www.ama-assn.org/go/cpt"), "99213")));
+        List<ConstraintViolation> violations = validation.validateCodes(
+                List.of(new CodePhrase(new TerminologyId("http://www.ama-assn.org/go/cpt"), "99213")));
 
         assertThat(violations).hasSize(1);
         assertThat(violations.get(0).toString()).contains("99213", "http://www.ama-assn.org/go/cpt", "not recognized");
@@ -100,43 +97,44 @@ class FhirTerminologyValidationTest {
         FhirTerminologyValidation validation = spy(new FhirTerminologyValidation("http://terminology.local"));
         doReturn(JsonPath.parse("""
                 {"parameter":[{"valueBoolean":false}]}
-                """))
-                .when(validation)
-                .internalGet(Mockito.anyString());
+                """)).when(validation).internalGet(Mockito.anyString());
 
-        List<ConstraintViolation> violations = validation.validateCodes(List.of(
-                new CodePhrase(new TerminologyId("http://www.ama-assn.org/go/cpt"), "99213")));
+        List<ConstraintViolation> violations = validation.validateCodes(
+                List.of(new CodePhrase(new TerminologyId("http://www.ama-assn.org/go/cpt"), "99213")));
 
-        assertThat(violations).singleElement().extracting(Object::toString).asString().contains("code not found");
+        assertThat(violations)
+                .singleElement()
+                .extracting(Object::toString)
+                .asString()
+                .contains("code not found");
     }
 
     @Test
     void validateCodesFailsOpenWhenConfigured() {
         FhirTerminologyValidation validation = spy(new FhirTerminologyValidation("http://terminology.local", false));
-        doThrow(unavailable())
-                .when(validation)
-                .internalGet(Mockito.anyString());
+        doThrow(unavailable()).when(validation).internalGet(Mockito.anyString());
 
-        assertThat(validation.validateCodes(List.of(
-                        new CodePhrase(new TerminologyId("http://www.ama-assn.org/go/cpt"), "99213"))))
+        assertThat(validation.validateCodes(
+                        List.of(new CodePhrase(new TerminologyId("http://www.ama-assn.org/go/cpt"), "99213"))))
                 .isEmpty();
     }
 
     @Test
     void validateCodesFailsClosedWhenConfigured() {
         FhirTerminologyValidation validation = spy(new FhirTerminologyValidation("http://terminology.local", true));
-        doThrow(unavailable())
-                .when(validation)
-                .internalGet(Mockito.anyString());
+        doThrow(unavailable()).when(validation).internalGet(Mockito.anyString());
 
-        assertThatThrownBy(() -> validation.validateCodes(List.of(
-                        new CodePhrase(new TerminologyId("http://www.ama-assn.org/go/cpt"), "99213"))))
+        assertThatThrownBy(() -> validation.validateCodes(
+                        List.of(new CodePhrase(new TerminologyId("http://www.ama-assn.org/go/cpt"), "99213"))))
                 .isInstanceOf(ExternalTerminologyValidationException.class);
     }
 
     private static WebClientRequestException unavailable() {
         return new WebClientRequestException(
-                new IOException("unavailable"), HttpMethod.GET, URI.create("http://terminology.local"), HttpHeaders.EMPTY);
+                new IOException("unavailable"),
+                HttpMethod.GET,
+                URI.create("http://terminology.local"),
+                HttpHeaders.EMPTY);
     }
 
     @Test

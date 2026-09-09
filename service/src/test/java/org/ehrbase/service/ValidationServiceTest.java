@@ -117,7 +117,12 @@ class ValidationServiceTest {
     }
 
     private final ValidationService spyService = spy(new ValidationServiceImp(
-            templateService, new TerminologyServiceImp(), serverConfig, objectProvider, billingCodeValidatorProvider, false));
+            templateService,
+            new TerminologyServiceImp(),
+            serverConfig,
+            objectProvider,
+            billingCodeValidatorProvider,
+            false));
 
     @BeforeEach
     void setUp() {
@@ -269,9 +274,10 @@ class ValidationServiceTest {
     void checkCompositionInvokesBillingValidatorAfterRmValidation() {
         Composition composition = loadComposition(CompositionTestDataCanonicalJson.ALL_TYPES);
         composition.setUid(new ObjectVersionId("85379aa8-a16a-4d5b-97ad-242880066803", "test-system", "42"));
-        String templateID = Objects.requireNonNull(composition.getArchetypeDetails().getTemplateId()).getValue();
-        WebTemplate webTemplate =
-                loadWebTemplate(OperationalTemplateTestData.findByTemplateId(templateID));
+        String templateID = Objects.requireNonNull(
+                        composition.getArchetypeDetails().getTemplateId())
+                .getValue();
+        WebTemplate webTemplate = loadWebTemplate(OperationalTemplateTestData.findByTemplateId(templateID));
         when(templateService.getInternalTemplate(templateID)).thenReturn(webTemplate);
 
         BillingCodeValidator billingValidator = mock();
@@ -292,7 +298,9 @@ class ValidationServiceTest {
     void checkCompositionWithoutBillingValidatorProviderKeepsValidCompositionBehavior() {
         Composition composition = loadComposition(CompositionTestDataCanonicalJson.ALL_TYPES);
         composition.setUid(new ObjectVersionId("85379aa8-a16a-4d5b-97ad-242880066803", "test-system", "42"));
-        String templateID = Objects.requireNonNull(composition.getArchetypeDetails().getTemplateId()).getValue();
+        String templateID = Objects.requireNonNull(
+                        composition.getArchetypeDetails().getTemplateId())
+                .getValue();
         when(templateService.getInternalTemplate(templateID))
                 .thenReturn(loadWebTemplate(OperationalTemplateTestData.findByTemplateId(templateID)));
 

@@ -19,24 +19,35 @@ package org.ehrbase.service.validation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.spy;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 import com.jayway.jsonpath.JsonPath;
 import com.nedap.archie.rm.composition.Composition;
 import com.nedap.archie.rm.composition.Evaluation;
 import com.nedap.archie.rm.datastructures.Element;
+import com.nedap.archie.rm.datastructures.Item;
 import com.nedap.archie.rm.datastructures.ItemTree;
 import com.nedap.archie.rm.datatypes.CodePhrase;
 import com.nedap.archie.rm.datavalues.DvCodedText;
 import com.nedap.archie.rm.datavalues.DvText;
 import com.nedap.archie.rm.support.identification.TerminologyId;
+import java.io.IOException;
+import java.net.URI;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
+import org.ehrbase.openehr.sdk.validation.ConstraintViolation;
 import org.ehrbase.openehr.sdk.validation.ConstraintViolationException;
+import org.ehrbase.openehr.sdk.validation.terminology.ExternalTerminologyValidationException;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.web.reactive.function.client.WebClientRequestException;
 
 class BillingCodeValidatorTest {
 
@@ -48,8 +59,8 @@ class BillingCodeValidatorTest {
         doReturn(JsonPath.parse("{\"parameter\":[{\"valueBoolean\":true}]}"))
                 .when(validation)
                 .internalGet(org.mockito.ArgumentMatchers.anyString());
-        BillingCodeValidator validator = new BillingCodeValidator(List.of(new BillingValidationProfile(
-                "claims", Set.of("billing.claim.v1"), Set.of(ICD10), validation)));
+        BillingCodeValidator validator = new BillingCodeValidator(
+                List.of(new BillingValidationProfile("claims", Set.of("billing.claim.v1"), Set.of(ICD10), validation)));
 
         validator.validate("billing.claim.v1", composition(new CodePhrase(new TerminologyId(ICD10), "A01")));
 
@@ -61,11 +72,9 @@ class BillingCodeValidatorTest {
         FhirTerminologyValidation validation = spy(new FhirTerminologyValidation("http://terminology.local"));
         doReturn(JsonPath.parse("""
                 {"parameter":[{"valueBoolean":false},{"valueString":"invalid"}]}
-                """))
-                .when(validation)
-                .internalGet(org.mockito.ArgumentMatchers.anyString());
-        BillingCodeValidator validator = new BillingCodeValidator(List.of(new BillingValidationProfile(
-                "claims", Set.of("billing.claim.v1"), Set.of(ICD10), validation)));
+                """)).when(validation).internalGet(org.mockito.ArgumentMatchers.anyString());
+        BillingCodeValidator validator = new BillingCodeValidator(
+                List.of(new BillingValidationProfile("claims", Set.of("billing.claim.v1"), Set.of(ICD10), validation)));
 
         assertThatThrownBy(() -> validator.validate(
                         "billing.claim.v1", composition(new CodePhrase(new TerminologyId(ICD10), "A01"))))
@@ -76,8 +85,8 @@ class BillingCodeValidatorTest {
     @Test
     void nonMatchingTemplatesDoNotCallTerminologyValidation() {
         FhirTerminologyValidation validation = spy(new FhirTerminologyValidation("http://terminology.local"));
-        BillingCodeValidator validator = new BillingCodeValidator(List.of(new BillingValidationProfile(
-                "claims", Set.of("billing.claim.v1"), Set.of(ICD10), validation)));
+        BillingCodeValidator validator = new BillingCodeValidator(
+                List.of(new BillingValidationProfile("claims", Set.of("billing.claim.v1"), Set.of(ICD10), validation)));
 
         validator.validate("other.template", composition(new CodePhrase(new TerminologyId(ICD10), "A01")));
 
@@ -95,10 +104,97 @@ class BillingCodeValidatorTest {
                 .hasMessageContaining("billing.claim.v1", "first", "second");
     }
 
-    private static Composition composition(CodePhrase code) {
+    @Test
+    void duplicateSystemAndCodePairsAreValidatedOnce() {
+        FhirTerminologyValidation validation = spy(new FhirTerminologyValidation("http://terminology.local"));
+        doReturn(JsonPath.parse("{\"parameter\":[{\"valueBoolean\":true}]}"))
+                .when(validation)
+                .internalGet(org.mockito.ArgumentMatchers.anyString());
+        BillingCodeValidator validator = validator(validation, Set.of(ICD10));
+
+        validator.validate(
+                "billing.claim.v1",
+                composition(
+                        new CodePhrase(new TerminologyId(ICD10), "A01"),
+                        new CodePhrase(new TerminologyId(ICD10), "A01")));
+
+        verify(validation, times(1)).internalGet(org.mockito.ArgumentMatchers.contains("code=A01"));
+    }
+
+    @Test
+    void severalInvalidCodesAreAccumulated() {
+        FhirTerminologyValidation validation = spy(new FhirTerminologyValidation("http://terminology.local"));
+        doReturn(JsonPath.parse("""
+                {"parameter":[{"valueBoolean":false},{"valueString":"invalid"}]}
+                """)).when(validation).internalGet(org.mockito.ArgumentMatchers.anyString());
+        BillingCodeValidator validator = validator(validation, Set.of(ICD10, "http://www.ama-assn.org/go/cpt"));
+
+        Throwable thrown = catchThrowable(() -> validator.validate(
+                "billing.claim.v1",
+                composition(
+                        new CodePhrase(new TerminologyId(ICD10), "A01"),
+                        new CodePhrase(new TerminologyId("http://www.ama-assn.org/go/cpt"), "99213"))));
+
+        assertThat(thrown).isInstanceOf(ConstraintViolationException.class);
+        List<ConstraintViolation> violations = ((ConstraintViolationException) thrown).getConstraintViolations();
+        assertThat(violations).hasSize(2);
+        assertThat(thrown).hasMessageContaining("A01", ICD10, "99213", "http://www.ama-assn.org/go/cpt");
+    }
+
+    @Test
+    void failOpenAcceptsTerminologyErrors() {
+        FhirTerminologyValidation validation = spy(new FhirTerminologyValidation("http://terminology.local", false));
+        doThrow(unavailable()).when(validation).internalGet(org.mockito.ArgumentMatchers.anyString());
+        BillingCodeValidator validator = validator(validation, Set.of(ICD10));
+
+        validator.validate("billing.claim.v1", composition(new CodePhrase(new TerminologyId(ICD10), "A01")));
+
+        verify(validation).internalGet(org.mockito.ArgumentMatchers.contains("code=A01"));
+    }
+
+    @Test
+    void failClosedRejectsTerminologyErrors() {
+        FhirTerminologyValidation validation = spy(new FhirTerminologyValidation("http://terminology.local", true));
+        doThrow(unavailable()).when(validation).internalGet(org.mockito.ArgumentMatchers.anyString());
+        BillingCodeValidator validator = validator(validation, Set.of(ICD10));
+
+        assertThatThrownBy(() -> validator.validate(
+                        "billing.claim.v1", composition(new CodePhrase(new TerminologyId(ICD10), "A01"))))
+                .isInstanceOf(ExternalTerminologyValidationException.class);
+    }
+
+    @Test
+    void emptyCollectedCodeSetDoesNotCallTerminologyValidation() {
+        FhirTerminologyValidation validation = spy(new FhirTerminologyValidation("http://terminology.local"));
+        BillingCodeValidator validator = validator(validation, Set.of(ICD10));
+
+        validator.validate(
+                "billing.claim.v1", composition(new CodePhrase(new TerminologyId("http://snomed.info/sct"), "123")));
+
+        verify(validation, times(0)).internalGet(org.mockito.ArgumentMatchers.anyString());
+    }
+
+    private static BillingCodeValidator validator(FhirTerminologyValidation validation, Set<String> codeSystems) {
+        return new BillingCodeValidator(
+                List.of(new BillingValidationProfile("claims", Set.of("billing.claim.v1"), codeSystems, validation)));
+    }
+
+    private static WebClientRequestException unavailable() {
+        return new WebClientRequestException(
+                new IOException("unavailable"),
+                HttpMethod.GET,
+                URI.create("http://terminology.local"),
+                HttpHeaders.EMPTY);
+    }
+
+    private static Composition composition(CodePhrase... codes) {
         Composition composition = new Composition();
         ItemTree tree = new ItemTree();
-        tree.setItems(List.of(new Element("code", new DvText("code"), new DvCodedText("display", code))));
+        List<Item> items = Arrays.stream(codes)
+                .map(code -> new Element("code", new DvText("code"), new DvCodedText("display", code)))
+                .map(item -> (Item) item)
+                .toList();
+        tree.setItems(items);
         Evaluation evaluation = new Evaluation();
         evaluation.setData(tree);
         composition.setContent(List.of(evaluation));
