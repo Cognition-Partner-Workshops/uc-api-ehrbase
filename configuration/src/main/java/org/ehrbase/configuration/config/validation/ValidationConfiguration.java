@@ -18,19 +18,27 @@
 package org.ehrbase.configuration.config.validation;
 
 import com.jayway.jsonpath.DocumentContext;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.ehrbase.api.exception.BadGatewayException;
 import org.ehrbase.api.exception.InternalServerException;
 import org.ehrbase.cache.CacheProvider;
 import org.ehrbase.openehr.sdk.validation.terminology.ExternalTerminologyValidation;
 import org.ehrbase.openehr.sdk.validation.terminology.ExternalTerminologyValidationChain;
+import org.ehrbase.service.validation.BillingCodeValidator;
+import org.ehrbase.service.validation.BillingValidationProfile;
 import org.ehrbase.service.validation.FhirTerminologyValidation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.cache.Cache;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClientManager;
 import org.springframework.security.oauth2.client.web.reactive.function.client.ServletOAuth2AuthorizedClientExchangeFilterFunction;
@@ -61,27 +69,37 @@ public class ValidationConfiguration {
     }
 
     @Bean
-    public ExternalTerminologyValidation externalTerminologyValidator() {
+    public Map<String, ExternalTerminologyValidation> externalTerminologyValidations() {
         if (!properties.isEnabled()) {
             logger.warn(ERR_MSG);
-            return nopTerminologyValidation();
+            return Map.of();
         }
 
         final Map<String, ExternalValidationProperties.Provider> providers = properties.getProvider();
-
         if (providers.isEmpty()) {
             throw new IllegalStateException("At least one external terminology provider must be defined "
                     + "if 'validation.external-validation.enabled' is set to 'true'");
-        } else if (providers.size() == 1) {
-            return buildExternalTerminologyValidation(
-                    providers.entrySet().iterator().next());
-        } else {
-            ExternalTerminologyValidationChain chain = new ExternalTerminologyValidationChain();
-            for (Map.Entry<String, ExternalValidationProperties.Provider> namedProvider : providers.entrySet()) {
-                chain.addExternalTerminologyValidationSupport(buildExternalTerminologyValidation(namedProvider));
-            }
-            return chain;
         }
+        Map<String, ExternalTerminologyValidation> validations = new LinkedHashMap<>();
+        for (Map.Entry<String, ExternalValidationProperties.Provider> namedProvider : providers.entrySet()) {
+            validations.put(namedProvider.getKey(), buildExternalTerminologyValidation(namedProvider));
+        }
+        return validations;
+    }
+
+    @Bean
+    public ExternalTerminologyValidation externalTerminologyValidator(
+            @Qualifier("externalTerminologyValidations")
+                    Map<String, ExternalTerminologyValidation> externalTerminologyValidations) {
+        if (!properties.isEnabled()) {
+            return nopTerminologyValidation();
+        }
+        if (externalTerminologyValidations.size() == 1) {
+            return externalTerminologyValidations.values().iterator().next();
+        }
+        ExternalTerminologyValidationChain chain = new ExternalTerminologyValidationChain();
+        externalTerminologyValidations.values().forEach(chain::addExternalTerminologyValidationSupport);
+        return chain;
     }
 
     private ExternalTerminologyValidation buildExternalTerminologyValidation(
@@ -151,5 +169,55 @@ public class ValidationConfiguration {
                 }
             }
         };
+    }
+
+    @Configuration
+    @Conditional(BillingProfilesEnabledCondition.class)
+    static class BillingValidationConfiguration {
+
+        @Bean
+        BillingCodeValidator billingCodeValidator(
+                ExternalValidationProperties properties,
+                @Qualifier("externalTerminologyValidations")
+                        Map<String, ExternalTerminologyValidation> externalTerminologyValidations) {
+            List<BillingValidationProfile> profiles = new ArrayList<>();
+            for (Map.Entry<String, ExternalValidationProperties.BillingProfile> entry :
+                    properties.getBillingProfiles().entrySet()) {
+                String profileName = entry.getKey();
+                ExternalValidationProperties.BillingProfile profile = entry.getValue();
+                if (!profile.isEnabled()) {
+                    LoggerFactory.getLogger(BillingValidationConfiguration.class)
+                            .info("Billing validation profile '{}' is disabled", profileName);
+                    continue;
+                }
+
+                ExternalTerminologyValidation validation;
+                if (profile.getProvider() != null) {
+                    validation = externalTerminologyValidations.get(profile.getProvider());
+                    if (validation == null) {
+                        throw new IllegalStateException(
+                                "Billing profile '%s' references unknown terminology provider '%s'"
+                                        .formatted(profileName, profile.getProvider()));
+                    }
+                } else if (externalTerminologyValidations.size() == 1) {
+                    validation =
+                            externalTerminologyValidations.values().iterator().next();
+                } else {
+                    throw new IllegalStateException(
+                            "Billing profile '%s' must specify an explicit terminology provider when several providers are configured"
+                                    .formatted(profileName));
+                }
+                if (!(validation instanceof FhirTerminologyValidation fhirValidation)) {
+                    throw new IllegalStateException(
+                            "Billing profile '%s' requires a FHIR terminology provider".formatted(profileName));
+                }
+                profiles.add(new BillingValidationProfile(
+                        profileName,
+                        Set.copyOf(profile.getTemplateIds()),
+                        Set.copyOf(profile.getCodeSystems()),
+                        fhirValidation));
+            }
+            return new BillingCodeValidator(profiles);
+        }
     }
 }

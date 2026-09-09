@@ -246,6 +246,32 @@ class EhrServiceTest {
     }
 
     @Test
+    void isQueryableReturnsTrue() {
+        UUID ehrId = UUID.randomUUID();
+        doReturn(true).when(ehrRepository).fetchIsQueryable(ehrId);
+
+        assertThat(service().isQueryable(ehrId)).isTrue();
+    }
+
+    @Test
+    void isQueryableReturnsFalse() {
+        UUID ehrId = UUID.randomUUID();
+        doReturn(false).when(ehrRepository).fetchIsQueryable(ehrId);
+
+        assertThat(service().isQueryable(ehrId)).isFalse();
+    }
+
+    @Test
+    void isQueryableThrowsWhenEhrDoesNotExist() {
+        UUID ehrId = UUID.randomUUID();
+        doReturn(null).when(ehrRepository).fetchIsQueryable(ehrId);
+
+        assertThatThrownBy(() -> service().isQueryable(ehrId))
+                .isInstanceOf(ObjectNotFoundException.class)
+                .hasMessage("No EHR found with given ID: " + ehrId);
+    }
+
+    @Test
     void getEhrStatusAtVersionEhrNotFound() {
 
         UUID ehrId = UUID.fromString("d783d2f0-0686-4dc0-a04e-0c7272687952");
