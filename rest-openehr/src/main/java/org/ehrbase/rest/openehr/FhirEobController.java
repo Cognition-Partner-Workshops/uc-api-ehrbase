@@ -17,7 +17,6 @@
  */
 package org.ehrbase.rest.openehr;
 
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -38,8 +37,8 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import org.springframework.web.util.UriComponentsBuilder;
-import org.springframework.web.util.UriUtils;
 
 @RestController
 @ConditionalOnProperty(prefix = "ehrbase.fhir.billing", name = "enabled", havingValue = "true")
@@ -88,7 +87,7 @@ public class FhirEobController extends BaseController implements FhirEobApiSpeci
     }
 
     protected UriComponentsBuilder currentRequest() {
-        return org.springframework.web.servlet.support.ServletUriComponentsBuilder.fromCurrentRequest();
+        return ServletUriComponentsBuilder.fromCurrentRequest();
     }
 
     private FhirBundle bundle(String patient, ExplanationOfBenefitService.EobPage page) {
@@ -110,15 +109,13 @@ public class FhirEobController extends BaseController implements FhirEobApiSpeci
         links.add(new FhirBundleLink("self", self));
         if (page.hasMore()) {
             String next = request.cloneBuilder()
-                    .replaceQueryParam("_count", page.count())
-                    .replaceQueryParam("_offset", page.offset() + page.count())
+                    .replaceQuery(null)
+                    .queryParam("patient", patient)
+                    .queryParam("_count", page.count())
+                    .queryParam("_offset", page.offset() + page.count())
+                    .encode()
                     .build()
                     .toUriString();
-            next = next.replace(
-                    "patient=" + patient,
-                    "patient="
-                            + UriUtils.encodeQueryParam(patient, StandardCharsets.UTF_8)
-                                    .replace("/", "%2F"));
             links.add(new FhirBundleLink("next", next));
         }
 

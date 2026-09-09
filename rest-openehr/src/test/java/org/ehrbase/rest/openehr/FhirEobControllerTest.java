@@ -119,10 +119,12 @@ class FhirEobControllerTest {
                 .isEqualTo("https://host/ehrbase/rest/fhir/r4/ExplanationOfBenefit/eob-1");
         assertThat(bundle.link()).extracting("relation").containsExactly("self", "next");
         assertThat(bundle.link().getFirst().url()).isEqualTo(CURRENT_REQUEST);
-        assertThat(bundle.link().get(1).url())
-                .contains("_count=2")
-                .contains("_offset=2")
-                .contains("patient=Patient%2Fp1");
+        var nextQuery = UriComponentsBuilder.fromUriString(bundle.link().get(1).url())
+                .build()
+                .getQueryParams();
+        assertThat(nextQuery.getFirst("patient")).isEqualTo("Patient/p1");
+        assertThat(nextQuery.getFirst("_count")).isEqualTo("2");
+        assertThat(nextQuery.getFirst("_offset")).isEqualTo("2");
     }
 
     @Test
