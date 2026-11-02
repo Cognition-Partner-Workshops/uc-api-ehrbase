@@ -244,6 +244,25 @@ validation:
     #     # request-timeout: 30S # 30 Seconds default
     #     type: FHIR
     #     url: https://r4.ontoserver.csiro.au/fhir/
+    # billing-profiles:
+    #   us-claims:
+    #     enabled: false # opt-in; independent of external-terminology.enabled
+    #     provider: fhir # name from external-terminology.provider
+    #     template-ids: [] # empty means all templates
+    #     code-systems:
+    #       icd10:
+    #         system: 'http://hl7.org/fhir/sid/icd-10-cm'
+    #         terminology-ids: [ICD10, ICD-10-CM]
+    #       cpt:
+    #         system: 'http://www.ama-assn.org/go/cpt'
+    #         terminology-ids: [CPT]
+    #       hcpcs:
+    #         system: 'https://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets'
+    #         terminology-ids: [HCPCS]
+    #       snomed:
+    #         system: 'http://snomed.info/sct'
+    #         terminology-ids: [SNOMED-CT, SNOMED]
+    #         # value-set: 'https://example.org/fhir/ValueSet/billing-subset'
 
 # SSL Properties (used by Spring WebClient and Apache HTTP Client)
 client:
