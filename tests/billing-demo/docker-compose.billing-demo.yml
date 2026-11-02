@@ -1,0 +1,31 @@
+services:
+  ehrdb:
+    ports: !override []
+
+  ehrbase:
+    image: ${EHRBASE_IMAGE:-ehrbase/ehrbase:em51-billing}
+    links: !override []
+    depends_on: !override
+      ehrdb:
+        condition: service_healthy
+      mock-terminology:
+        condition: service_started
+    environment:
+      VALIDATION_EXTERNAL_TERMINOLOGY_ENABLED: "true"
+      VALIDATION_EXTERNAL_TERMINOLOGY_FAIL_ON_ERROR: "true"
+      SPRING_APPLICATION_JSON: '{"validation":{"external-terminology":{"provider":{"billing-fhir":{"type":"FHIR","url":"http://mock-terminology:8090/fhir"}},"billing-profiles":{"us-claims":{"enabled":${BILLING_PROFILE_ENABLED:-true},"provider":"billing-fhir","template-ids":["billing_claim.v1"],"code-systems":{"snomed-ct":{"value-set":"http://ehrbase.org/fhir/ValueSet/billing-snomed"}}}}}}}'
+
+  keycloak:
+    profiles:
+      - oauth
+
+  mock-terminology:
+    image: eclipse-temurin:25-jdk
+    command: ["java", "MockTerminologyServer.java"]
+    volumes:
+      - ./tests/billing-demo/MockTerminologyServer.java:/app/MockTerminologyServer.java:ro
+    working_dir: /app
+    expose:
+      - "8090"
+    networks:
+      - ehrbase-net
