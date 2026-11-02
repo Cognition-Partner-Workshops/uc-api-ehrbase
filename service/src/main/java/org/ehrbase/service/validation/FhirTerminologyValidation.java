@@ -19,6 +19,8 @@ package org.ehrbase.service.validation;
 
 import static java.lang.String.format;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.net.HttpHeaders;
 import com.jayway.jsonpath.DocumentContext;
 import com.jayway.jsonpath.JsonPath;
@@ -27,8 +29,10 @@ import com.nedap.archie.rm.datavalues.DvCodedText;
 import com.nedap.archie.rm.support.identification.TerminologyId;
 import java.text.MessageFormat;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -47,6 +51,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatusCode;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.util.MultiValueMap;
@@ -63,6 +68,7 @@ import reactor.netty.http.client.HttpClient;
  */
 public class FhirTerminologyValidation implements ExternalTerminologyValidation {
     private static final Logger LOG = LoggerFactory.getLogger(FhirTerminologyValidation.class);
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private final String baseUrl;
     private final boolean failOnError;
     private final WebClient webClient;
@@ -117,6 +123,155 @@ public class FhirTerminologyValidation implements ExternalTerminologyValidation 
                     "Error response received from the terminology server. HTTP status: %s. Body: %s"
                             .formatted(statusCode, responseBody));
         }
+    }
+
+    protected DocumentContext internalPost(String uri, String body) throws WebClientException {
+        WebClient client = buildRestClientCall(uri);
+        WebClient.RequestBodyUriSpec method = client.method(HttpMethod.POST);
+        ResponseEntity<String> respEntity = Optional.ofNullable(
+                        method.contentType(MediaType.parseMediaType("application/fhir+json"))
+                                .bodyValue(body)
+                                .exchangeToMono(response -> response.toEntity(String.class))
+                                .block())
+                .orElseThrow(() -> new InternalServerException("could not connect to external Terminology Server"));
+
+        String responseBody = respEntity.getBody();
+        HttpStatusCode statusCode = respEntity.getStatusCode();
+        if (statusCode.is2xxSuccessful()) {
+            return JsonPath.parse(responseBody);
+        }
+        throw new ExternalTerminologyValidationException(
+                "Error response received from the terminology server. HTTP status: %s. Body: %s"
+                        .formatted(statusCode, responseBody));
+    }
+
+    public List<CodeValidationResult> validateCodes(List<CodeValidationRequest> requests) {
+        if (requests.isEmpty()) {
+            return List.of();
+        }
+
+        final String requestBody;
+        try {
+            requestBody = OBJECT_MAPPER.writeValueAsString(buildBatchRequest(requests));
+        } catch (JsonProcessingException e) {
+            return handleBatchFailure(requests, e);
+        }
+
+        final List<?> entries;
+        try {
+            DocumentContext context = internalPost(baseUrl, requestBody);
+            String resourceType = context.read("$.resourceType", String.class);
+            String type = context.read("$.type", String.class);
+            if (!"Bundle".equals(resourceType) || !"batch-response".equals(type)) {
+                throw new IllegalArgumentException("FHIR response is not a batch-response Bundle");
+            }
+            entries = context.read("$.entry", List.class);
+            if (entries.size() != requests.size()) {
+                throw new IllegalArgumentException("FHIR batch response entry count did not match request count");
+            }
+        } catch (RuntimeException e) {
+            return handleBatchFailure(requests, e);
+        }
+
+        List<CodeValidationResult> results = new ArrayList<>(requests.size());
+        for (int i = 0; i < requests.size(); i++) {
+            CodeValidationRequest request = requests.get(i);
+            try {
+                results.add(parseValidationResult(request, entries.get(i)));
+            } catch (RuntimeException e) {
+                if (failOnError) {
+                    throw externalValidationException("FHIR batch response entry %d is invalid".formatted(i), e);
+                }
+                LOG.warn("FHIR batch response entry {} is invalid: {}", i, e.getMessage());
+                results.add(new CodeValidationResult(request, CodeValidationResult.Status.UNAVAILABLE, null));
+            }
+        }
+        return results;
+    }
+
+    private static Map<String, Object> buildBatchRequest(List<CodeValidationRequest> requests) {
+        List<Map<String, Object>> entries = new ArrayList<>(requests.size());
+        for (CodeValidationRequest request : requests) {
+            List<Map<String, Object>> parameters = new ArrayList<>();
+            if (request.valueSetUrl() == null) {
+                parameters.add(Map.of("name", "url", "valueUri", request.system()));
+            } else {
+                parameters.add(Map.of("name", "url", "valueUri", request.valueSetUrl()));
+                parameters.add(Map.of("name", "system", "valueUri", request.system()));
+            }
+            parameters.add(Map.of("name", "code", "valueCode", request.code()));
+
+            Map<String, Object> resource = new LinkedHashMap<>();
+            resource.put("resourceType", "Parameters");
+            resource.put("parameter", parameters);
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put(
+                    "request",
+                    Map.of(
+                            "method",
+                            "POST",
+                            "url",
+                            request.valueSetUrl() == null ? "CodeSystem/$validate-code" : "ValueSet/$validate-code"));
+            entry.put("resource", resource);
+            entries.add(entry);
+        }
+        return Map.of("resourceType", "Bundle", "type", "batch", "entry", entries);
+    }
+
+    private CodeValidationResult parseValidationResult(CodeValidationRequest request, Object rawEntry) {
+        if (!(rawEntry instanceof Map<?, ?> entry)) {
+            throw new IllegalArgumentException("FHIR batch response entry is not an object");
+        }
+        Object rawResponse = entry.get("response");
+        if (!(rawResponse instanceof Map<?, ?> response)) {
+            throw new IllegalArgumentException("FHIR batch response entry has no response");
+        }
+        Object rawStatus = response.get("status");
+        if (!(rawStatus instanceof String status) || !status.startsWith("2")) {
+            throw new IllegalArgumentException("FHIR batch response entry status is not successful");
+        }
+
+        Object rawResource = entry.get("resource");
+        if (!(rawResource instanceof Map<?, ?> resource)
+                || !(resource.get("parameter") instanceof List<?> parameters)) {
+            throw new IllegalArgumentException("FHIR batch response entry has no Parameters resource");
+        }
+        Map<?, ?> resultParameter = findParameter(parameters, "result");
+        if (resultParameter == null || !(resultParameter.get("valueBoolean") instanceof Boolean valid)) {
+            throw new IllegalArgumentException("FHIR batch response entry is missing result");
+        }
+        Map<?, ?> messageParameter = findParameter(parameters, "message");
+        String message = messageParameter == null || !(messageParameter.get("valueString") instanceof String value)
+                ? null
+                : value;
+        return new CodeValidationResult(
+                request, valid ? CodeValidationResult.Status.VALID : CodeValidationResult.Status.INVALID, message);
+    }
+
+    private static Map<?, ?> findParameter(List<?> parameters, String name) {
+        return parameters.stream()
+                .filter(Map.class::isInstance)
+                .map(Map.class::cast)
+                .filter(parameter -> name.equals(parameter.get("name")))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private List<CodeValidationResult> handleBatchFailure(List<CodeValidationRequest> requests, Exception e) {
+        if (failOnError) {
+            throw externalValidationException("An error occurred while validating billing codes", e);
+        }
+        LOG.warn("An error occurred while validating billing codes: {}", e.getMessage());
+        return requests.stream()
+                .map(request -> new CodeValidationResult(request, CodeValidationResult.Status.UNAVAILABLE, null))
+                .toList();
+    }
+
+    private static ExternalTerminologyValidationException externalValidationException(String message, Exception e) {
+        if (e instanceof ExternalTerminologyValidationException externalException) {
+            return externalException;
+        }
+        return new ExternalTerminologyValidationException(message, e);
     }
 
     static final String SUPPORTS_CODE_SYS_TEMPL = "%s/CodeSystem?url=%s";

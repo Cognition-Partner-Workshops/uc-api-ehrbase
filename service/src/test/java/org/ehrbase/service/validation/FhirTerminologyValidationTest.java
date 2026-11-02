@@ -17,7 +17,9 @@
  */
 package org.ehrbase.service.validation;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.*;
 import static org.mockito.Mockito.doReturn;
@@ -31,12 +33,16 @@ import com.jayway.jsonpath.DocumentContext;
 import com.jayway.jsonpath.JsonPath;
 import com.jayway.jsonpath.internal.JsonContext;
 import com.nedap.archie.rm.datavalues.DvCodedText;
+import java.io.IOException;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.IllegalFormatException;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 import net.java.quickcheck.generator.PrimitiveGenerators;
+import org.ehrbase.openehr.sdk.validation.terminology.ExternalTerminologyValidationException;
 import org.ehrbase.openehr.sdk.validation.terminology.TerminologyParam;
 import org.ehrbase.service.validation.FhirTerminologyValidation.ValueSetConverter;
 import org.hl7.fhir.r4.model.ValueSet;
@@ -44,7 +50,14 @@ import org.hl7.fhir.r4.model.ValueSet.ValueSetExpansionComponent;
 import org.hl7.fhir.r4.model.ValueSet.ValueSetExpansionContainsComponent;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.web.reactive.function.client.WebClientRequestException;
 
 class FhirTerminologyValidationTest {
 
@@ -129,6 +142,148 @@ class FhirTerminologyValidationTest {
                 "//invalid/ValueSet/$expand?url=http://snomed.info/sct?fhir_vs=ecl/%3C306206005&activeOnly=true")));
 
         verify(validation, never()).internalGet(Mockito.anyString());
+    }
+
+    @Test
+    void validateCodesEmptyInputDoesNotPost() {
+        FhirTerminologyValidation validation = spy(new FhirTerminologyValidation("http://terminology.local"));
+
+        assertTrue(validation.validateCodes(List.of()).isEmpty());
+
+        verify(validation, never()).internalPost(Mockito.anyString(), Mockito.anyString());
+    }
+
+    @Test
+    void validateCodesBuildsBatchAndParsesParametersByName() {
+        FhirTerminologyValidation validation = spy(new FhirTerminologyValidation("http://terminology.local"));
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        List<CodeValidationRequest> requests = List.of(
+                new CodeValidationRequest("http://hl7.org/fhir/sid/icd-10-cm", "E11.9", null),
+                new CodeValidationRequest(
+                        "http://snomed.info/sct", "44054006", "http://ehrbase.org/fhir/ValueSet/billing-snomed"));
+        doReturn(JsonPath.parse("""
+                {
+                  "resourceType":"Bundle",
+                  "type":"batch-response",
+                  "entry":[
+                    {"response":{"status":"200 OK"},"resource":{"resourceType":"Parameters","parameter":[
+                      {"name":"message","valueString":"not valid"},
+                      {"name":"result","valueBoolean":false}
+                    ]}},
+                    {"response":{"status":"200 OK"},"resource":{"resourceType":"Parameters","parameter":[
+                      {"name":"result","valueBoolean":true}
+                    ]}}
+                  ]
+                }
+                """))
+                .when(validation)
+                .internalPost(Mockito.eq("http://terminology.local"), body.capture());
+
+        List<CodeValidationResult> results = validation.validateCodes(requests);
+
+        assertEquals(2, results.size());
+        assertEquals(CodeValidationResult.Status.INVALID, results.get(0).status());
+        assertEquals("not valid", results.get(0).message());
+        assertEquals(CodeValidationResult.Status.VALID, results.get(1).status());
+        DocumentContext requestBundle = JsonPath.parse(body.getValue());
+        assertEquals("Bundle", requestBundle.read("$.resourceType", String.class));
+        assertEquals("batch", requestBundle.read("$.type", String.class));
+        assertEquals(2, requestBundle.read("$.entry.length()", Integer.class));
+        assertEquals("POST", requestBundle.read("$.entry[0].request.method", String.class));
+        assertEquals("CodeSystem/$validate-code", requestBundle.read("$.entry[0].request.url", String.class));
+        assertEquals(
+                "http://hl7.org/fhir/sid/icd-10-cm",
+                requestBundle.read("$.entry[0].resource.parameter[0].valueUri", String.class));
+        assertEquals("E11.9", requestBundle.read("$.entry[0].resource.parameter[1].valueCode", String.class));
+        assertEquals("ValueSet/$validate-code", requestBundle.read("$.entry[1].request.url", String.class));
+        assertEquals(
+                "http://ehrbase.org/fhir/ValueSet/billing-snomed",
+                requestBundle.read("$.entry[1].resource.parameter[0].valueUri", String.class));
+        assertEquals(
+                "http://snomed.info/sct",
+                requestBundle.read("$.entry[1].resource.parameter[1].valueUri", String.class));
+        assertEquals("44054006", requestBundle.read("$.entry[1].resource.parameter[2].valueCode", String.class));
+    }
+
+    @Test
+    void validateCodesInvalidResultUsesMessageParameter() {
+        FhirTerminologyValidation validation = validationWithResponse("""
+                {
+                  "resourceType":"Bundle","type":"batch-response",
+                  "entry":[{"response":{"status":"200"},"resource":{"resourceType":"Parameters","parameter":[
+                    {"name":"message","valueString":"code is retired"},
+                    {"name":"result","valueBoolean":false}
+                  ]}}]
+                }
+                """);
+
+        CodeValidationResult result = validation
+                .validateCodes(List.of(new CodeValidationRequest("system", "bad-code", null)))
+                .getFirst();
+
+        assertEquals(CodeValidationResult.Status.INVALID, result.status());
+        assertEquals("code is retired", result.message());
+    }
+
+    @ParameterizedTest
+    @MethodSource("validationFailures")
+    void validateCodesHonorsFailOnError(
+            String scenario, RuntimeException exception, String responseBody, boolean failOnError) {
+        FhirTerminologyValidation validation =
+                spy(new FhirTerminologyValidation("http://terminology.local", failOnError));
+        if (exception != null) {
+            doThrow(exception).when(validation).internalPost(Mockito.anyString(), Mockito.anyString());
+        } else {
+            doReturn(JsonPath.parse(responseBody))
+                    .when(validation)
+                    .internalPost(Mockito.anyString(), Mockito.anyString());
+        }
+
+        if (failOnError) {
+            assertThrows(
+                    ExternalTerminologyValidationException.class,
+                    () -> validation.validateCodes(List.of(new CodeValidationRequest("system", "code", null))),
+                    scenario);
+        } else {
+            CodeValidationResult result = validation
+                    .validateCodes(List.of(new CodeValidationRequest("system", "code", null)))
+                    .getFirst();
+            assertEquals(CodeValidationResult.Status.UNAVAILABLE, result.status(), scenario);
+        }
+    }
+
+    private static Stream<Arguments> validationFailures() {
+        RuntimeException httpFailure = new ExternalTerminologyValidationException("HTTP status 500");
+        RuntimeException connectionFailure = new WebClientRequestException(
+                new IOException("connection refused"),
+                HttpMethod.POST,
+                URI.create("http://terminology.local"),
+                HttpHeaders.EMPTY);
+        String badStatus = """
+                {"resourceType":"Bundle","type":"batch-response","entry":[
+                  {"response":{"status":"500"},"resource":{"resourceType":"Parameters","parameter":[]}}
+                ]}
+                """;
+        String missingResult = """
+                {"resourceType":"Bundle","type":"batch-response","entry":[
+                  {"response":{"status":"200"},"resource":{"resourceType":"Parameters","parameter":[]}}
+                ]}
+                """;
+        return Stream.of(
+                Arguments.of("HTTP 500 fail-closed", httpFailure, null, true),
+                Arguments.of("HTTP 500 fail-open", httpFailure, null, false),
+                Arguments.of("connection fail-closed", connectionFailure, null, true),
+                Arguments.of("connection fail-open", connectionFailure, null, false),
+                Arguments.of("entry status fail-closed", null, badStatus, true),
+                Arguments.of("entry status fail-open", null, badStatus, false),
+                Arguments.of("missing result fail-closed", null, missingResult, true),
+                Arguments.of("missing result fail-open", null, missingResult, false));
+    }
+
+    private static FhirTerminologyValidation validationWithResponse(String responseBody) {
+        FhirTerminologyValidation validation = spy(new FhirTerminologyValidation("http://terminology.local"));
+        doReturn(JsonPath.parse(responseBody)).when(validation).internalPost(Mockito.anyString(), Mockito.anyString());
+        return validation;
     }
 
     static ValueSet anyValueSet() {

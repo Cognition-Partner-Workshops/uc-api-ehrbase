@@ -79,6 +79,7 @@ import org.ehrbase.openehr.sdk.validation.terminology.ExternalTerminologyValidat
 import org.ehrbase.openehr.sdk.validation.terminology.TerminologyParam;
 import org.ehrbase.openehr.sdk.webtemplate.model.WebTemplate;
 import org.ehrbase.openehr.sdk.webtemplate.parser.OPTParser;
+import org.ehrbase.service.validation.BillingCodeValidator;
 import org.ehrbase.service.validation.ValidationProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -95,6 +96,7 @@ class ValidationServiceTest {
     private final ValidationProperties serverConfig = new ValidationProperties(true, true, true);
 
     private final ObjectProvider<ExternalTerminologyValidation> objectProvider = mock();
+    private final ObjectProvider<BillingCodeValidator> billingCodeValidatorProvider = mock();
 
     private static class NopTerminologyValidation implements ExternalTerminologyValidation {
 
@@ -114,11 +116,16 @@ class ValidationServiceTest {
     }
 
     private final ValidationService spyService = spy(new ValidationServiceImp(
-            templateService, new TerminologyServiceImp(), serverConfig, objectProvider, false));
+            templateService,
+            new TerminologyServiceImp(),
+            serverConfig,
+            objectProvider,
+            billingCodeValidatorProvider,
+            false));
 
     @BeforeEach
     void setUp() {
-        Mockito.reset(templateService, objectProvider, spyService);
+        Mockito.reset(templateService, objectProvider, billingCodeValidatorProvider, spyService);
         when(objectProvider.getIfAvailable()).thenReturn(new NopTerminologyValidation());
     }
 
