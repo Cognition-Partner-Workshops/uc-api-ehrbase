@@ -31,9 +31,6 @@ class BillingProfilesEnabledCondition extends SpringBootCondition {
         ExternalValidationProperties properties = Binder.get(context.getEnvironment())
                 .bind("validation.external-terminology", Bindable.of(ExternalValidationProperties.class))
                 .orElseGet(ExternalValidationProperties::new);
-        if (!properties.isEnabled()) {
-            return ConditionOutcome.noMatch("External terminology validation is disabled");
-        }
         boolean enabled = properties.getBillingProfiles().values().stream()
                 .anyMatch(ExternalValidationProperties.BillingProfile::isEnabled);
         return enabled

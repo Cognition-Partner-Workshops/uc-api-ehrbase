@@ -110,13 +110,13 @@ public class ExternalValidationProperties {
 
     public static class BillingProfile {
 
-        private boolean enabled = true;
+        private boolean enabled = false;
 
         private String provider;
 
         private final List<String> templateIds = new ArrayList<>();
 
-        private final List<String> codeSystems = new ArrayList<>();
+        private final Map<String, BillingCodeSystem> codeSystems = new HashMap<>();
 
         public boolean isEnabled() {
             return enabled;
@@ -145,15 +145,34 @@ public class ExternalValidationProperties {
             }
         }
 
-        public List<String> getCodeSystems() {
+        public Map<String, BillingCodeSystem> getCodeSystems() {
             return codeSystems;
         }
+    }
 
-        public void setCodeSystems(List<String> codeSystems) {
-            this.codeSystems.clear();
-            if (codeSystems != null) {
-                this.codeSystems.addAll(codeSystems);
-            }
+    public static class BillingCodeSystem {
+        private String system;
+        private String valueSet;
+        private final List<String> terminologyIds = new ArrayList<>();
+
+        public String getSystem() {
+            return system;
+        }
+
+        public void setSystem(String system) {
+            this.system = system;
+        }
+
+        public String getValueSet() {
+            return valueSet;
+        }
+
+        public void setValueSet(String valueSet) {
+            this.valueSet = valueSet;
+        }
+
+        public List<String> getTerminologyIds() {
+            return terminologyIds;
         }
     }
 }

@@ -70,7 +70,9 @@ public class ValidationConfiguration {
 
     @Bean
     public Map<String, ExternalTerminologyValidation> externalTerminologyValidations() {
-        if (!properties.isEnabled()) {
+        if (!properties.isEnabled()
+                && properties.getBillingProfiles().values().stream()
+                        .noneMatch(ExternalValidationProperties.BillingProfile::isEnabled)) {
             logger.warn(ERR_MSG);
             return Map.of();
         }
@@ -78,7 +80,7 @@ public class ValidationConfiguration {
         final Map<String, ExternalValidationProperties.Provider> providers = properties.getProvider();
         if (providers.isEmpty()) {
             throw new IllegalStateException("At least one external terminology provider must be defined "
-                    + "if 'validation.external-validation.enabled' is set to 'true'");
+                    + "if 'validation.external-terminology.enabled' is set to 'true'");
         }
         Map<String, ExternalTerminologyValidation> validations = new LinkedHashMap<>();
         for (Map.Entry<String, ExternalValidationProperties.Provider> namedProvider : providers.entrySet()) {
@@ -199,13 +201,9 @@ public class ValidationConfiguration {
                                 "Billing profile '%s' references unknown terminology provider '%s'"
                                         .formatted(profileName, profile.getProvider()));
                     }
-                } else if (externalTerminologyValidations.size() == 1) {
-                    validation =
-                            externalTerminologyValidations.values().iterator().next();
                 } else {
-                    throw new IllegalStateException(
-                            "Billing profile '%s' must specify an explicit terminology provider when several providers are configured"
-                                    .formatted(profileName));
+                    throw new IllegalStateException("Billing profile '%s' must specify an explicit terminology provider"
+                            .formatted(profileName));
                 }
                 if (!(validation instanceof FhirTerminologyValidation fhirValidation)) {
                     throw new IllegalStateException(
@@ -214,7 +212,13 @@ public class ValidationConfiguration {
                 profiles.add(new BillingValidationProfile(
                         profileName,
                         Set.copyOf(profile.getTemplateIds()),
-                        Set.copyOf(profile.getCodeSystems()),
+                        profile.getCodeSystems().entrySet().stream()
+                                .map(system -> new BillingValidationProfile.CodeSystem(
+                                        system.getKey(),
+                                        system.getValue().getSystem(),
+                                        system.getValue().getTerminologyIds(),
+                                        system.getValue().getValueSet()))
+                                .toList(),
                         fhirValidation));
             }
             return new BillingCodeValidator(profiles);

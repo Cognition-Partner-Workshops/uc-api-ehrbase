@@ -191,7 +191,12 @@ public class ValidationServiceImp implements ValidationService {
         } catch (ReflectiveOperationException e) {
             throw new InternalServerException(e);
         }
-        billingCodeValidatorProvider.ifAvailable(v -> v.validate(templateID, composition));
+        billingCodeValidatorProvider.ifAvailable(v -> {
+            List<ConstraintViolation> billingViolations = v.validate(templateID, composition);
+            if (!billingViolations.isEmpty()) {
+                throw new ConstraintViolationException(billingViolations);
+            }
+        });
     }
 
     private static void compositionMandatoryProperty(Object value, String attribute) {

@@ -17,120 +17,141 @@
  */
 package org.ehrbase.service.validation;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.*;
 
-import com.nedap.archie.rm.composition.Composition;
-import com.nedap.archie.rm.composition.Evaluation;
-import com.nedap.archie.rm.datastructures.Element;
-import com.nedap.archie.rm.datastructures.Item;
-import com.nedap.archie.rm.datastructures.ItemTree;
-import com.nedap.archie.rm.datatypes.CodePhrase;
-import com.nedap.archie.rm.datavalues.DvCodedText;
-import com.nedap.archie.rm.datavalues.DvText;
-import com.nedap.archie.rm.support.identification.TerminologyId;
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpServer;
+import com.jayway.jsonpath.JsonPath;
+import com.sun.net.httpserver.*;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
-import org.ehrbase.openehr.sdk.validation.ConstraintViolationException;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.springframework.web.reactive.function.client.WebClient;
+import java.util.*;
+import java.util.concurrent.CopyOnWriteArrayList;
+import org.ehrbase.openehr.sdk.validation.terminology.ExternalTerminologyValidationException;
+import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class BillingTerminologyValidationIT {
-
-    private static final String ICD10 = "http://hl7.org/fhir/sid/icd-10-cm";
-    private static final String CPT = "http://www.ama-assn.org/go/cpt";
-    private static final String HCPCS = "https://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets";
-
     private HttpServer server;
-    private List<String> requests;
+    private final List<Map<String, Object>> requests = new CopyOnWriteArrayList<>();
+    private int status = 200;
+    private String body;
 
     @BeforeEach
-    void setUp() throws IOException {
-        requests = new ArrayList<>();
-        server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/", this::handle);
+    void start() throws IOException {
+        server = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        server.createContext("/", exchange -> {
+            assertThat(exchange.getRequestMethod()).isEqualTo("POST");
+            assertThat(exchange.getRequestHeaders().getFirst("Content-Type")).isEqualTo("application/fhir+json");
+            requests.add(JsonPath.parse(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8))
+                    .json());
+            byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/fhir+json");
+            exchange.sendResponseHeaders(status, bytes.length);
+            try (exchange) {
+                exchange.getResponseBody().write(bytes);
+            }
+        });
         server.start();
     }
 
     @AfterEach
-    void tearDown() {
+    void stop() {
         server.stop(0);
     }
 
     @Test
-    void validatesCodesAgainstFhirServer() {
-        FhirTerminologyValidation terminologyValidation = new FhirTerminologyValidation(
-                "http://localhost:" + server.getAddress().getPort(), true, WebClient.create());
-        BillingCodeValidator validator = new BillingCodeValidator(List.of(new BillingValidationProfile(
-                "claims",
-                java.util.Set.of("billing.claim.v1"),
-                java.util.Set.of(ICD10, CPT, HCPCS),
-                terminologyValidation)));
-
-        validator.validate(
-                "billing.claim.v1",
-                composition(
-                        new CodePhrase(new TerminologyId(ICD10), "A01"),
-                        new CodePhrase(new TerminologyId(CPT), "99213"),
-                        new CodePhrase(new TerminologyId(HCPCS), "J1234")));
-
-        assertThat(requests)
-                .containsExactlyInAnyOrder(
-                        "/CodeSystem/$validate-code?url=http://hl7.org/fhir/sid/icd-10-cm&code=A01",
-                        "/CodeSystem/$validate-code?url=http://www.ama-assn.org/go/cpt&code=99213",
-                        "/CodeSystem/$validate-code?url=https://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets&code=J1234");
+    void oneBatchPerCompositionWithAllSystemsAndDeduplication() {
+        body = response(4, true);
+        FhirTerminologyValidation provider = provider(true);
+        List<BillingValidationProfile.CodeSystem> systems = new ArrayList<>();
+        for (String name : List.of("icd10", "cpt", "hcpcs", "snomed")) {
+            systems.add(new BillingValidationProfile.CodeSystem(
+                    name,
+                    "http://" + name,
+                    List.of(name, name + "-alias"),
+                    name.equals("snomed") ? "http://billing-subset" : null));
+        }
+        BillingCodeValidator validator =
+                new BillingCodeValidator(List.of(new BillingValidationProfile("claims", Set.of(), systems, provider)));
+        assertThat(validator.validate(
+                        "any",
+                        BillingCodeValidatorTest.composition(
+                                "icd10", "icd10-alias", "cpt", "hcpcs", "snomed", "local")))
+                .isEmpty();
+        assertThat(requests).hasSize(1);
+        var request = JsonPath.parse(requests.get(0));
+        assertThat(request.read("$.type", String.class)).isEqualTo("batch");
+        assertThat(request.read("$.entry", List.class)).hasSize(4);
+        assertThat(request.read("$.entry[3].request.url", String.class)).isEqualTo("ValueSet/$validate-code");
+        assertThat(request.read("$.entry[3].resource.parameter[0].valueUri", String.class))
+                .isEqualTo("http://billing-subset");
+        assertThat(request.read("$.entry[3].resource.parameter[2].valueUri", String.class))
+                .isEqualTo("http://snomed");
     }
 
     @Test
-    void invalidCodeIncludesSystemAndTemplateMismatchDoesNotRequest() {
-        FhirTerminologyValidation terminologyValidation = new FhirTerminologyValidation(
-                "http://localhost:" + server.getAddress().getPort(), true, WebClient.create());
-        BillingCodeValidator validator = new BillingCodeValidator(List.of(new BillingValidationProfile(
-                "claims", java.util.Set.of("billing.claim.v1"), java.util.Set.of(ICD10), terminologyValidation)));
-
-        assertThatThrownBy(() -> validator.validate(
-                        "billing.claim.v1", composition(new CodePhrase(new TerminologyId(ICD10), "BAD"))))
-                .isInstanceOf(ConstraintViolationException.class)
-                .hasMessageContaining("BAD", ICD10);
-
-        requests.clear();
-        validator.validate("other.template", composition(new CodePhrase(new TerminologyId(ICD10), "BAD")));
-        assertThat(requests).isEmpty();
+    void invalidCodesReturnFixedDiagnosticAndByNameResult() {
+        body = response(1, false);
+        var violations = BillingCodeValidatorTest.validator(provider(true), Set.of(), "cpt")
+                .validate("any", BillingCodeValidatorTest.composition("alias", "alternate"));
+        assertThat(violations)
+                .singleElement()
+                .satisfies(v -> assertThat(v.toString())
+                        .contains(
+                                "profile=claims",
+                                "codeSystem=cpt",
+                                "system=http://system",
+                                "code=A01",
+                                "path=/content[0]/data/items[0]/value",
+                                "not found"));
+        assertThat(requests).hasSize(1);
     }
 
-    private void handle(HttpExchange exchange) throws IOException {
-        requests.add(exchange.getRequestURI().toString());
-        assertThat(exchange.getRequestHeaders().getFirst("Accept")).isEqualTo("application/fhir+json");
-        boolean invalid = exchange.getRequestURI().getQuery().contains("code=BAD");
-        String response = invalid
-                ? "{\"resourceType\":\"Parameters\",\"parameter\":[{\"name\":\"result\",\"valueBoolean\":false},{\"name\":\"message\",\"valueString\":\"not found\"}]}"
-                : "{\"resourceType\":\"Parameters\",\"parameter\":[{\"name\":\"result\",\"valueBoolean\":true}]}";
-        byte[] body = response.getBytes(StandardCharsets.UTF_8);
-        exchange.getResponseHeaders().set("Content-Type", "application/fhir+json");
-        exchange.sendResponseHeaders(200, body.length);
-        try (exchange) {
-            exchange.getResponseBody().write(body);
-        }
+    @ParameterizedTest
+    @ValueSource(strings = {"http", "malformed", "count", "result", "entry"})
+    void failuresRespectFailOnError(String failure) {
+        body = switch (failure) {
+            case "http" -> {
+                status = 503;
+                yield "{}";
+            }
+            case "malformed" -> "{";
+            case "count" -> response(0, true);
+            case "result" -> response(1, true).replace("result", "other");
+            default -> response(1, true).replace("200 OK", "500 Error");
+        };
+        assertThat(BillingCodeValidatorTest.validator(provider(false), Set.of(), "cpt")
+                        .validate("any", BillingCodeValidatorTest.composition("alias")))
+                .isEmpty();
+        assertThatThrownBy(() -> BillingCodeValidatorTest.validator(provider(true), Set.of(), "cpt")
+                        .validate("any", BillingCodeValidatorTest.composition("alias")))
+                .isInstanceOf(ExternalTerminologyValidationException.class);
     }
 
-    private static Composition composition(CodePhrase... codes) {
-        Composition composition = new Composition();
-        ItemTree tree = new ItemTree();
-        List<Item> elements = new ArrayList<>();
-        for (CodePhrase code : codes) {
-            elements.add(new Element("code", new DvText("code"), new DvCodedText("display", code)));
-        }
-        tree.setItems(elements);
-        Evaluation evaluation = new Evaluation();
-        evaluation.setData(tree);
-        composition.setContent(List.of(evaluation));
-        return composition;
+    @Test
+    void ioFailureRespectsFailOnError() {
+        server.stop(0);
+        assertThat(BillingCodeValidatorTest.validator(provider(false), Set.of(), "cpt")
+                        .validate("any", BillingCodeValidatorTest.composition("alias")))
+                .isEmpty();
+        assertThatThrownBy(() -> BillingCodeValidatorTest.validator(provider(true), Set.of(), "cpt")
+                        .validate("any", BillingCodeValidatorTest.composition("alias")))
+                .isInstanceOf(ExternalTerminologyValidationException.class);
+    }
+
+    private FhirTerminologyValidation provider(boolean fail) {
+        return new FhirTerminologyValidation(
+                "http://localhost:" + server.getAddress().getPort(), fail);
+    }
+
+    private static String response(int count, boolean valid) {
+        String entry = """
+            {"response":{"status":"200 OK"},"resource":{"resourceType":"Parameters",
+            "parameter":[{"name":"message","valueString":"not found"},{"name":"display","valueString":"ignored"},
+            {"name":"result","valueBoolean":%s}]}}
+            """.formatted(valid);
+        return "{\"resourceType\":\"Bundle\",\"type\":\"batch-response\",\"entry\":["
+                + String.join(",", Collections.nCopies(count, entry)) + "]}";
     }
 }

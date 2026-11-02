@@ -17,100 +17,96 @@
  */
 package org.ehrbase.configuration.config.validation;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.mock;
 
+import java.util.Map;
 import org.ehrbase.cache.CacheProvider;
-import org.ehrbase.service.validation.BillingCodeValidator;
+import org.ehrbase.service.validation.*;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 class ExternalValidationPropertiesTest {
-
-    private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
+    private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withUserConfiguration(ValidationConfiguration.class)
             .withBean(CacheProvider.class, () -> mock(CacheProvider.class));
 
+    private ApplicationContextRunner configured() {
+        return runner.withPropertyValues(
+                "validation.external-terminology.provider.fhir.type=FHIR",
+                "validation.external-terminology.provider.fhir.url=http://terminology.local",
+                "validation.external-terminology.billing-profiles.claims.enabled=true",
+                "validation.external-terminology.billing-profiles.claims.provider=fhir",
+                "validation.external-terminology.billing-profiles.claims.code-systems.icd10.system=http://icd10",
+                "validation.external-terminology.billing-profiles.claims.code-systems.icd10.terminology-ids[0]=ICD10",
+                "validation.external-terminology.billing-profiles.claims.code-systems.icd10.terminology-ids[1]=ICD-10-CM");
+    }
+
     @Test
-    void billingProfilesBindAndCreateValidator() {
-        contextRunner
-                .withPropertyValues(
-                        "validation.external-terminology.enabled=true",
+    void bindsProfilesIndependentlyOfExternalValidation() {
+        configured().run(context -> {
+            assertThat(context).hasSingleBean(BillingCodeValidator.class);
+            var profile = context.getBean(ExternalValidationProperties.class)
+                    .getBillingProfiles()
+                    .get("claims");
+            assertThat(profile.getTemplateIds()).isEmpty();
+            assertThat(profile.getCodeSystems().get("icd10").getTerminologyIds())
+                    .containsExactly("ICD10", "ICD-10-CM");
+        });
+    }
+
+    @Test
+    void disabledByDefaultAndAbsentMeansNoBean() {
+        runner.run(context -> assertThat(context).doesNotHaveBean(BillingCodeValidator.class));
+        runner.withPropertyValues("validation.external-terminology.billing-profiles.claims.provider=missing")
+                .run(context -> assertThat(context).doesNotHaveBean(BillingCodeValidator.class));
+        configured()
+                .withPropertyValues("validation.external-terminology.billing-profiles.claims.enabled=false")
+                .run(context -> assertThat(context).doesNotHaveBean(BillingCodeValidator.class));
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "provider=missing",
+                "provider=",
+                "code-systems.icd10.system=",
+                "code-systems.icd10.terminology-ids[1]=ICD10",
+                "code-systems.icd10.value-set=http://not-snomed"
+            })
+    void badProfilesFailStartup(String property) {
+        configured()
+                .withPropertyValues("validation.external-terminology.billing-profiles.claims." + property)
+                .run(context -> assertThat(context.getStartupFailure()).hasStackTraceContaining("claims"));
+    }
+
+    @Test
+    void enabledProfileRequiresSystems() {
+        runner.withPropertyValues(
                         "validation.external-terminology.provider.fhir.type=FHIR",
                         "validation.external-terminology.provider.fhir.url=http://terminology.local",
-                        "validation.external-terminology.billing-profiles.claims.template-ids[0]=billing.claim.v1",
-                        "validation.external-terminology.billing-profiles.claims.code-systems[0]=http://hl7.org/fhir/sid/icd-10-cm")
+                        "validation.external-terminology.billing-profiles.claims.enabled=true",
+                        "validation.external-terminology.billing-profiles.claims.provider=fhir")
+                .run(context ->
+                        assertThat(context.getStartupFailure()).hasStackTraceContaining("must define code systems"));
+    }
+
+    @Test
+    void providerIsSharedWithExistingExternalValidation() {
+        configured()
+                .withPropertyValues(
+                        "validation.external-terminology.enabled=true",
+                        "validation.external-terminology.billing-profiles.claims.template-ids[0]=billing")
                 .run(context -> {
-                    BillingCodeValidator validator = context.getBean(BillingCodeValidator.class);
-                    assertThat(validator.findProfile("billing.claim.v1"))
-                            .isPresent()
-                            .get()
-                            .extracting(profile -> profile.name())
-                            .isEqualTo("claims");
+                    Map<String, ?> providers = (Map<String, ?>) context.getBean("externalTerminologyValidations");
+                    assertThat(providers.get("fhir")).isSameAs(context.getBean("externalTerminologyValidator"));
+                    assertThat(context.getBean(ExternalValidationProperties.class)
+                                    .getBillingProfiles()
+                                    .get("claims")
+                                    .getTemplateIds())
+                            .containsExactly("billing");
                 });
-    }
-
-    @Test
-    void disabledProfileDoesNotCreateBillingValidator() {
-        contextRunner
-                .withPropertyValues(
-                        "validation.external-terminology.enabled=true",
-                        "validation.external-terminology.provider.fhir.type=FHIR",
-                        "validation.external-terminology.provider.fhir.url=http://terminology.local",
-                        "validation.external-terminology.billing-profiles.claims.enabled=false",
-                        "validation.external-terminology.billing-profiles.claims.template-ids[0]=billing.claim.v1",
-                        "validation.external-terminology.billing-profiles.claims.code-systems[0]=http://hl7.org/fhir/sid/icd-10-cm")
-                .run(context -> assertThat(context).doesNotHaveBean(BillingCodeValidator.class));
-    }
-
-    @Test
-    void unknownProviderFailsContext() {
-        contextRunner
-                .withPropertyValues(
-                        "validation.external-terminology.enabled=true",
-                        "validation.external-terminology.provider.fhir.type=FHIR",
-                        "validation.external-terminology.provider.fhir.url=http://terminology.local",
-                        "validation.external-terminology.billing-profiles.claims.provider=missing",
-                        "validation.external-terminology.billing-profiles.claims.template-ids[0]=billing.claim.v1",
-                        "validation.external-terminology.billing-profiles.claims.code-systems[0]=http://hl7.org/fhir/sid/icd-10-cm")
-                .run(context -> assertThat(context.getStartupFailure()).hasStackTraceContaining("missing"));
-    }
-
-    @Test
-    void multipleProvidersRequireExplicitProvider() {
-        contextRunner
-                .withPropertyValues(
-                        "validation.external-terminology.enabled=true",
-                        "validation.external-terminology.provider.fhir.type=FHIR",
-                        "validation.external-terminology.provider.fhir.url=http://terminology.local",
-                        "validation.external-terminology.provider.other.type=FHIR",
-                        "validation.external-terminology.provider.other.url=http://terminology.other",
-                        "validation.external-terminology.billing-profiles.claims.template-ids[0]=billing.claim.v1",
-                        "validation.external-terminology.billing-profiles.claims.code-systems[0]=http://hl7.org/fhir/sid/icd-10-cm")
-                .run(context -> assertThat(context.getStartupFailure())
-                        .hasStackTraceContaining("must specify an explicit terminology provider"));
-    }
-
-    @Test
-    void missingTemplateIdsFailsContext() {
-        contextRunner
-                .withPropertyValues(
-                        "validation.external-terminology.enabled=true",
-                        "validation.external-terminology.provider.fhir.type=FHIR",
-                        "validation.external-terminology.provider.fhir.url=http://terminology.local",
-                        "validation.external-terminology.billing-profiles.claims.code-systems[0]=http://hl7.org/fhir/sid/icd-10-cm")
-                .run(context -> assertThat(context.getStartupFailure())
-                        .hasStackTraceContaining("claims")
-                        .hasStackTraceContaining("template IDs"));
-    }
-
-    @Test
-    void disabledExternalValidationDoesNotCreateBillingValidator() {
-        contextRunner
-                .withPropertyValues(
-                        "validation.external-terminology.enabled=false",
-                        "validation.external-terminology.billing-profiles.claims.template-ids[0]=billing.claim.v1",
-                        "validation.external-terminology.billing-profiles.claims.code-systems[0]=http://hl7.org/fhir/sid/icd-10-cm")
-                .run(context -> assertThat(context).doesNotHaveBean(BillingCodeValidator.class));
     }
 }

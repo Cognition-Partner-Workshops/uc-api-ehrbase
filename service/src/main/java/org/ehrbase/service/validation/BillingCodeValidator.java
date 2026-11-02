@@ -32,108 +32,88 @@ import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import org.ehrbase.openehr.sdk.validation.ConstraintViolation;
-import org.ehrbase.openehr.sdk.validation.ConstraintViolationException;
 
+/** Collects billing-coded text from compositions for opt-in terminology validation. */
 public class BillingCodeValidator {
 
-    private final Map<String, BillingValidationProfile> profilesByTemplateId;
+    private final List<BillingValidationProfile> profiles;
 
     public BillingCodeValidator(Collection<BillingValidationProfile> profiles) {
-        Map<String, BillingValidationProfile> byTemplateId = new LinkedHashMap<>();
+        this.profiles = List.copyOf(profiles);
+    }
+
+    public List<ConstraintViolation> validate(String templateId, Composition composition) {
+        Map<FhirTerminologyValidation, List<FhirTerminologyValidation.BillingCode>> requests = new LinkedHashMap<>();
         for (BillingValidationProfile profile : profiles) {
-            for (String templateId : profile.templateIds()) {
-                BillingValidationProfile previous = byTemplateId.putIfAbsent(templateId, profile);
-                if (previous != null) {
-                    throw new IllegalArgumentException(
-                            "Billing template ID '%s' is configured in profiles '%s' and '%s'"
-                                    .formatted(templateId, previous.name(), profile.name()));
-                }
+            if (!profile.templateIds().isEmpty() && !profile.templateIds().contains(templateId)) {
+                continue;
             }
+            Map<String, BillingValidationProfile.CodeSystem> aliases = new LinkedHashMap<>();
+            profile.codeSystems()
+                    .forEach(system -> system.terminologyIds().forEach(alias -> aliases.put(alias, system)));
+            List<FhirTerminologyValidation.BillingCode> codes =
+                    requests.computeIfAbsent(profile.terminologyValidation(), ignored -> new ArrayList<>());
+            collectValue(
+                    composition,
+                    aliases,
+                    profile.name(),
+                    "",
+                    codes,
+                    Collections.newSetFromMap(new IdentityHashMap<>()));
         }
-        profilesByTemplateId = Map.copyOf(byTemplateId);
-    }
-
-    public Optional<BillingValidationProfile> findProfile(String templateId) {
-        return Optional.ofNullable(profilesByTemplateId.get(templateId));
-    }
-
-    public void validate(String templateId, Composition composition) {
-        Optional<BillingValidationProfile> profile = findProfile(templateId);
-        if (profile.isEmpty()) {
-            return;
-        }
-
-        List<CodePhrase> codes = collectCodes(composition, profile.get().codeSystems());
-        if (codes.isEmpty()) {
-            return;
-        }
-
-        List<ConstraintViolation> violations =
-                profile.get().terminologyValidation().validateCodes(codes);
-        if (!violations.isEmpty()) {
-            throw new ConstraintViolationException(violations);
-        }
-    }
-
-    static List<CodePhrase> collectCodes(Composition composition, Set<String> codeSystems) {
-        List<CodePhrase> codes = new ArrayList<>();
-        Set<Object> visited = Collections.newSetFromMap(new IdentityHashMap<>());
-        collectValue(composition, codeSystems, codes, visited);
-        return codes;
+        List<ConstraintViolation> violations = new ArrayList<>();
+        requests.forEach((provider, codes) -> violations.addAll(provider.validateCodes(codes)));
+        return violations;
     }
 
     private static void collectValue(
-            Object object, Set<String> codeSystems, List<CodePhrase> codes, Set<Object> visited) {
-        if (object == null) {
+            Object object,
+            Map<String, BillingValidationProfile.CodeSystem> aliases,
+            String profile,
+            String path,
+            List<FhirTerminologyValidation.BillingCode> codes,
+            Set<Object> visited) {
+        if (object == null || !visited.add(object)) {
             return;
         }
         if (object instanceof DvCodedText codedText) {
-            CodePhrase definingCode = codedText.getDefiningCode();
-            if (definingCode != null
-                    && definingCode.getTerminologyId() != null
-                    && codeSystems.contains(definingCode.getTerminologyId().getValue())) {
-                codes.add(definingCode);
+            CodePhrase code = codedText.getDefiningCode();
+            if (code != null && code.getTerminologyId() != null) {
+                BillingValidationProfile.CodeSystem system =
+                        aliases.get(code.getTerminologyId().getValue());
+                if (system != null) {
+                    codes.add(new FhirTerminologyValidation.BillingCode(
+                            profile, system.name(), system.system(), code.getCodeString(), path, system.valueSet()));
+                }
             }
-            return;
-        }
-        if (object instanceof Collection<?> collection) {
-            if (!visited.add(object)) {
-                return;
-            }
+        } else if (object instanceof Collection<?> collection) {
+            int index = 0;
             for (Object value : collection) {
-                collectValue(value, codeSystems, codes, visited);
+                collectValue(value, aliases, profile, path + "[" + index++ + "]", codes, visited);
             }
-            return;
-        }
-        if (object instanceof Map<?, ?> map) {
-            if (!visited.add(object)) {
+        } else if (object instanceof RMObject) {
+            RMTypeInfo typeInfo = ArchieRMInfoLookup.getInstance().getTypeInfo(object.getClass());
+            if (typeInfo == null) {
                 return;
             }
-            for (Object value : map.values()) {
-                collectValue(value, codeSystems, codes, visited);
-            }
-            return;
-        }
-        if (!(object instanceof RMObject) || !visited.add(object)) {
-            return;
-        }
-
-        RMTypeInfo typeInfo = ArchieRMInfoLookup.getInstance().getTypeInfo(object.getClass());
-        if (typeInfo == null) {
-            return;
-        }
-        for (RMAttributeInfo attribute : typeInfo.getAttributes().values()) {
-            if (attribute.isComputed()) {
-                continue;
-            }
-            try {
-                collectValue(attribute.getGetMethod().invoke(object), codeSystems, codes, visited);
-            } catch (IllegalAccessException | InvocationTargetException e) {
-                throw new IllegalStateException(
-                        "Unable to traverse RM attribute '%s'".formatted(attribute.getRmName()), e);
+            for (RMAttributeInfo attribute : typeInfo.getAttributes().values()) {
+                if (attribute.isComputed()) {
+                    continue;
+                }
+                try {
+                    collectValue(
+                            attribute.getGetMethod().invoke(object),
+                            aliases,
+                            profile,
+                            path + "/" + attribute.getRmName(),
+                            codes,
+                            visited);
+                } catch (IllegalAccessException | InvocationTargetException e) {
+                    throw new IllegalStateException(
+                            "Unable to traverse RM attribute '%s'".formatted(attribute.getRmName()), e);
+                }
             }
         }
     }

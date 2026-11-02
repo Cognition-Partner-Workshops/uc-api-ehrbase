@@ -292,6 +292,12 @@ class ValidationServiceTest {
         service().check(composition);
 
         Mockito.verify(billingValidator).validate(templateID, composition);
+
+        when(billingValidator.validate(templateID, composition))
+                .thenReturn(List.of(new ConstraintViolation("Invalid billing code")));
+        assertThatThrownBy(() -> service().check(composition))
+                .isInstanceOf(ConstraintViolationException.class)
+                .hasMessageContaining("Invalid billing code");
     }
 
     @Test
