@@ -1,0 +1,27 @@
+validation:
+  external-terminology:
+    enabled: false # normal external template validation remains unchanged
+    fail-on-error: true
+    provider:
+      qa:
+        type: FHIR
+        url: http://mock-fhir:8090
+    billing-profiles:
+      demo:
+        enabled: ${BILLING_PROFILE_ENABLED:true}
+        provider: qa
+        template-ids: [billing-qa.en.v1]
+        code-systems:
+          icd10:
+            system: http://hl7.org/fhir/sid/icd-10-cm
+            terminology-ids: [ICD10, ICD-10-CM]
+          cpt:
+            system: http://www.ama-assn.org/go/cpt
+            terminology-ids: [CPT]
+          hcpcs:
+            system: https://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets
+            terminology-ids: [HCPCS]
+          snomed:
+            system: http://snomed.info/sct
+            terminology-ids: [SNOMED-CT]
+            value-set: http://mock-fhir:8090/ValueSet/billing-subset
