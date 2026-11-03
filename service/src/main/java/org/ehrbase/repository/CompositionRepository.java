@@ -46,8 +46,10 @@ import org.ehrbase.service.TimeProvider;
 import org.jooq.Condition;
 import org.jooq.DSLContext;
 import org.jooq.Record1;
+import org.jooq.Record3;
 import org.jooq.Table;
 import org.jooq.TableField;
+import org.jooq.impl.DSL;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -150,6 +152,22 @@ public class CompositionRepository
                                 .where(COMP_VERSION_HISTORY.VO_ID.eq(compId)))
                         .fetchAny()
                 != null;
+    }
+
+    public EhrCompositionStats summarize(UUID ehrId) {
+        Record3<Integer, OffsetDateTime, UUID[]> result = context.select(
+                        DSL.count(),
+                        DSL.max(COMP_VERSION.SYS_PERIOD_LOWER),
+                        DSL.arrayAggDistinct(COMP_VERSION.TEMPLATE_ID))
+                .from(COMP_VERSION)
+                .where(COMP_VERSION.EHR_ID.eq(ehrId))
+                .fetchSingle();
+
+        UUID[] templateUuids = result.value3();
+        return new EhrCompositionStats(
+                result.value1().longValue(),
+                result.value2(),
+                templateUuids == null ? List.of() : List.of(templateUuids));
     }
 
     public Optional<Integer> getLatestVersionNumber(UUID compId) {

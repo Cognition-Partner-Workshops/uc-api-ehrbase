@@ -34,6 +34,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Supplier;
+import org.ehrbase.api.dto.EhrSummary;
 import org.ehrbase.api.exception.InvalidApiParameterException;
 import org.ehrbase.api.exception.ObjectNotFoundException;
 import org.ehrbase.api.service.EhrService;
@@ -170,6 +171,39 @@ class OpenehrEhrControllerTest {
         assertThatThrownBy(() -> controller.getEhrById("46e8518f-e9b7-45de-b214-1588466d71d6"))
                 .isInstanceOf(ObjectNotFoundException.class)
                 .hasMessage("No EHR found with given ID: 46e8518f-e9b7-45de-b214-1588466d71d6");
+    }
+
+    @Test
+    void getEhrSummaryInvalidUUID() {
+
+        assertThatThrownBy(() -> controller().getEhrSummary("not a uui"))
+                .isInstanceOf(ObjectNotFoundException.class)
+                .hasMessage("EHR not found, in fact, only UUID-type IDs are supported");
+    }
+
+    @Test
+    void getEhrSummaryNotExist() {
+
+        UUID ehrId = UUID.fromString("46e8518f-e9b7-45de-b214-1588466d71d6");
+        when(mockEhrService.getSummary(ehrId))
+                .thenThrow(new ObjectNotFoundException("ehr", "No EHR found with given ID: " + ehrId));
+
+        assertThatThrownBy(() -> controller().getEhrSummary(ehrId.toString()))
+                .isInstanceOf(ObjectNotFoundException.class)
+                .hasMessage("No EHR found with given ID: 46e8518f-e9b7-45de-b214-1588466d71d6");
+    }
+
+    @Test
+    void getEhrSummary() {
+
+        UUID ehrId = UUID.fromString("0c1f9fce-05bd-4f6f-a558-fc27a2140795");
+        EhrSummary summary = new EhrSummary(ehrId, 2, null, List.of("vital_signs.v1"));
+        when(mockEhrService.getSummary(ehrId)).thenReturn(summary);
+
+        var response = controller().getEhrSummary(ehrId.toString());
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isEqualTo(summary);
     }
 
     @Test
