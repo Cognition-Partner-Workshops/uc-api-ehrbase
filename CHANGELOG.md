@@ -7,6 +7,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [unreleased]
  ### Added
+- `GET /rest/openehr/v1/ehr/{ehr_id}/summary` returns the live composition count, last composition change and distinct template IDs of an EHR
  ### Changed 
  ### Fixed 
 

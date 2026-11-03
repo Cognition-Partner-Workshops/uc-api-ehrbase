@@ -24,6 +24,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
@@ -40,8 +41,11 @@ import com.nedap.archie.rm.support.identification.HierObjectId;
 import com.nedap.archie.rm.support.identification.ObjectVersionId;
 import com.nedap.archie.rm.support.identification.PartyRef;
 import com.nedap.archie.rm.support.identification.UIDBasedId;
+import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.ehrbase.api.dto.EhrSummary;
 import org.ehrbase.api.exception.ObjectNotFoundException;
 import org.ehrbase.api.exception.StateConflictException;
 import org.ehrbase.api.service.EhrService;
@@ -57,6 +61,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentMatchers;
+import org.mockito.InOrder;
 import org.mockito.Mockito;
 import org.springframework.dao.DuplicateKeyException;
 
@@ -323,5 +328,36 @@ class EhrServiceTest {
 
         assertThat(versionId.getObjectId()).isEqualTo(ifMatch.getObjectId());
         assertThat(versionId.getVersionTreeId().getValue()).isEqualTo("8");
+    }
+
+    @Test
+    void getSummary() {
+
+        UUID ehrId = UUID.fromString("5d4b8b1c-1f4e-4b3a-9d7a-2c6e8f0a1b2c");
+        OffsetDateTime lastModified = OffsetDateTime.parse("2026-11-03T10:15:30Z");
+        doReturn(true).when(ehrRepository).hasEhr(ehrId);
+        doReturn(new CompositionRepository.EhrCompositionStats(2, lastModified, List.of("vital_signs.v1")))
+                .when(compositionRepository)
+                .summarize(ehrId);
+
+        EhrSummary summary = service().getSummary(ehrId);
+
+        assertThat(summary).isEqualTo(new EhrSummary(ehrId, 2, lastModified, List.of("vital_signs.v1")));
+        InOrder inOrder = inOrder(spyEhrService, compositionRepository);
+        inOrder.verify(spyEhrService).checkEhrExists(ehrId);
+        inOrder.verify(compositionRepository).summarize(ehrId);
+    }
+
+    @Test
+    void getSummaryEhrNotFound() {
+
+        UUID ehrId = UUID.fromString("46e8518f-e9b7-45de-b214-1588466d71d6");
+        doReturn(false).when(ehrRepository).hasEhr(ehrId);
+
+        EhrService service = service();
+        assertThatThrownBy(() -> service.getSummary(ehrId))
+                .isInstanceOf(ObjectNotFoundException.class)
+                .hasMessage("EHR with id %s not found".formatted(ehrId));
+        verify(compositionRepository, never()).summarize(any());
     }
 }

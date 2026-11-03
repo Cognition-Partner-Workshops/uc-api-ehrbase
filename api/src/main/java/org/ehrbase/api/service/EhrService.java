@@ -26,6 +26,7 @@ import com.nedap.archie.rm.support.identification.ObjectVersionId;
 import java.time.OffsetDateTime;
 import java.util.Optional;
 import java.util.UUID;
+import org.ehrbase.api.dto.EhrSummary;
 import org.ehrbase.api.exception.ObjectNotFoundException;
 import org.ehrbase.api.exception.StateConflictException;
 import org.ehrbase.api.exception.ValidationException;
@@ -171,4 +172,13 @@ public interface EhrService {
      * @throws StateConflictException if the EHR is not modifiable.
      */
     void checkEhrExistsAndIsModifiable(UUID ehrId);
+
+    /**
+     * Summarizes the live (head) compositions of the given EHR.
+     *
+     * @param ehrId The EHR ID
+     * @return composition count, time of the last composition change and distinct template IDs
+     * @throws ObjectNotFoundException if no EHR is found
+     */
+    EhrSummary getSummary(UUID ehrId);
 }

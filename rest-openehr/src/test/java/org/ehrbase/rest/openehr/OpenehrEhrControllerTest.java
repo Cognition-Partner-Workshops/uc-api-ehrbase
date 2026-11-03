@@ -30,10 +30,12 @@ import static org.mockito.Mockito.when;
 import com.nedap.archie.rm.ehr.Ehr;
 import com.nedap.archie.rm.ehr.EhrStatus;
 import com.nedap.archie.rm.support.identification.ObjectVersionId;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Supplier;
+import org.ehrbase.api.dto.EhrSummary;
 import org.ehrbase.api.exception.InvalidApiParameterException;
 import org.ehrbase.api.exception.ObjectNotFoundException;
 import org.ehrbase.api.service.EhrService;
@@ -206,6 +208,42 @@ class OpenehrEhrControllerTest {
 
         var response = controller().getEhrBySubject("test_subject", "some:external:id");
         assertEhrResponseData(response, ehrId, ehrStatusDto);
+    }
+
+    @Test
+    void getEhrSummary() {
+
+        UUID ehrId = UUID.fromString("5d4b8b1c-1f4e-4b3a-9d7a-2c6e8f0a1b2c");
+        EhrSummary summary = new EhrSummary(
+                ehrId, 12, OffsetDateTime.parse("2026-11-03T10:15:30Z"), List.of("lab_results.v0", "vital_signs.v1"));
+
+        when(mockEhrService.getSummary(ehrId)).thenReturn(summary);
+
+        var response = controller().getEhrSummary(ehrId.toString());
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isEqualTo(summary);
+    }
+
+    @Test
+    void getEhrSummaryNotExist() {
+
+        UUID ehrId = UUID.fromString("46e8518f-e9b7-45de-b214-1588466d71d6");
+        when(mockEhrService.getSummary(ehrId))
+                .thenThrow(new ObjectNotFoundException("EHR", "EHR with id %s not found".formatted(ehrId)));
+
+        OpenehrEhrController controller = controller();
+        assertThatThrownBy(() -> controller.getEhrSummary(ehrId.toString()))
+                .isInstanceOf(ObjectNotFoundException.class)
+                .hasMessage("EHR with id %s not found".formatted(ehrId));
+    }
+
+    @Test
+    void getEhrSummaryInvalidUUID() {
+
+        OpenehrEhrController controller = controller();
+        assertThatThrownBy(() -> controller.getEhrSummary("not a uuid"))
+                .isInstanceOf(ObjectNotFoundException.class)
+                .hasMessage("EHR not found, in fact, only UUID-type IDs are supported");
     }
 
     private static void assertEhrResponseData(ResponseEntity<Ehr> response, UUID ehrId, EhrStatus ehrStatus) {
