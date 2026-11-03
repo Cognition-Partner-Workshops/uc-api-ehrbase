@@ -27,6 +27,7 @@ import com.nedap.archie.rm.support.identification.ObjectRef;
 import java.net.URI;
 import java.util.Objects;
 import java.util.UUID;
+import org.ehrbase.api.dto.EhrSummary;
 import org.ehrbase.api.exception.ObjectNotFoundException;
 import org.ehrbase.api.rest.HttpRestContext;
 import org.ehrbase.api.service.EhrService;
@@ -133,6 +134,15 @@ public class OpenehrEhrController extends BaseController implements EhrApiSpecif
 
         // Return HTTP 200 OK body builder
         return responseBuilder(HttpStatus.OK, ehrId).body(ehrResponseData);
+    }
+
+    @Override
+    @GetMapping(path = "/{ehr_id}/summary", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<EhrSummary> getEhrSummary(@PathVariable(value = "ehr_id") String ehrIdString) {
+        UUID ehrId = getEhrUuid(ehrIdString);
+        createRestContext(ehrId);
+
+        return ResponseEntity.ok(ehrService.getSummary(ehrId));
     }
 
     /**

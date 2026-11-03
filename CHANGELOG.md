@@ -7,6 +7,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [unreleased]
  ### Added
+- EHR summary endpoint `GET /ehr/{ehr_id}/summary` (live composition count, last modified, template ids)
  ### Changed 
  ### Fixed 
 

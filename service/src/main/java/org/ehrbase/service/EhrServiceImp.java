@@ -31,8 +31,11 @@ import com.nedap.archie.rm.support.identification.ArchetypeID;
 import com.nedap.archie.rm.support.identification.ObjectVersionId;
 import com.nedap.archie.rm.support.identification.PartyRef;
 import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import org.ehrbase.api.dto.EhrSummary;
 import org.ehrbase.api.exception.InternalServerException;
 import org.ehrbase.api.exception.ObjectNotFoundException;
 import org.ehrbase.api.exception.StateConflictException;
@@ -40,10 +43,12 @@ import org.ehrbase.api.exception.UnprocessableEntityException;
 import org.ehrbase.api.exception.ValidationException;
 import org.ehrbase.api.service.EhrService;
 import org.ehrbase.api.service.SystemService;
+import org.ehrbase.api.service.TemplateService;
 import org.ehrbase.api.service.ValidationService;
 import org.ehrbase.api.util.LocatableUtils;
 import org.ehrbase.openehr.sdk.util.rmconstants.RmConstants;
 import org.ehrbase.repository.CompositionRepository;
+import org.ehrbase.repository.EhrCompositionStats;
 import org.ehrbase.repository.EhrFolderRepository;
 import org.ehrbase.repository.EhrRepository;
 import org.ehrbase.repository.experimental.ItemTagRepository;
@@ -68,6 +73,7 @@ public class EhrServiceImp implements EhrService {
 
     private final EhrRepository ehrRepository;
     private final SystemService systemService;
+    private final TemplateService templateService;
 
     @Autowired
     public EhrServiceImp(
@@ -76,7 +82,8 @@ public class EhrServiceImp implements EhrService {
             EhrFolderRepository ehrFolderRepository,
             CompositionRepository compositionRepository,
             EhrRepository ehrRepository,
-            ItemTagRepository itemTagRepository) {
+            ItemTagRepository itemTagRepository,
+            TemplateService templateService) {
 
         this.validationService = validationService;
 
@@ -86,6 +93,21 @@ public class EhrServiceImp implements EhrService {
         this.itemTagRepository = itemTagRepository;
 
         this.systemService = systemService;
+        this.templateService = templateService;
+    }
+
+    @Override
+    public EhrSummary getSummary(UUID ehrId) {
+        checkEhrExists(ehrId);
+
+        EhrCompositionStats stats = compositionRepository.summarize(ehrId);
+        List<String> templateIds = stats.templateUuids().stream()
+                .map(templateService::findTemplateIdByUuid)
+                .filter(Objects::nonNull)
+                .sorted()
+                .toList();
+
+        return new EhrSummary(ehrId, stats.compositionCount(), stats.lastModified(), templateIds);
     }
 
     @Override

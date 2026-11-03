@@ -24,6 +24,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
@@ -40,15 +41,20 @@ import com.nedap.archie.rm.support.identification.HierObjectId;
 import com.nedap.archie.rm.support.identification.ObjectVersionId;
 import com.nedap.archie.rm.support.identification.PartyRef;
 import com.nedap.archie.rm.support.identification.UIDBasedId;
+import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.ehrbase.api.dto.EhrSummary;
 import org.ehrbase.api.exception.ObjectNotFoundException;
 import org.ehrbase.api.exception.StateConflictException;
 import org.ehrbase.api.service.EhrService;
 import org.ehrbase.api.service.SystemService;
+import org.ehrbase.api.service.TemplateService;
 import org.ehrbase.api.service.ValidationService;
 import org.ehrbase.openehr.sdk.util.rmconstants.RmConstants;
 import org.ehrbase.repository.CompositionRepository;
+import org.ehrbase.repository.EhrCompositionStats;
 import org.ehrbase.repository.EhrFolderRepository;
 import org.ehrbase.repository.EhrRepository;
 import org.ehrbase.repository.experimental.ItemTagRepository;
@@ -57,6 +63,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentMatchers;
+import org.mockito.InOrder;
 import org.mockito.Mockito;
 import org.springframework.dao.DuplicateKeyException;
 
@@ -70,6 +77,7 @@ class EhrServiceTest {
 
     private final EhrRepository ehrRepository = mock("Mock Ehr Repository");
     private final ItemTagRepository itemTagRepository = mock("Mock Item Tag Repository");
+    private final TemplateService templateService = mock();
 
     private final EhrService spyEhrService = spy(new EhrServiceImp(
             validationService,
@@ -77,11 +85,13 @@ class EhrServiceTest {
             ehrFolderRepository,
             compositionRepository,
             ehrRepository,
-            itemTagRepository));
+            itemTagRepository,
+            templateService));
 
     @BeforeEach
     void setUp() {
-        Mockito.reset(validationService, ehrFolderRepository, compositionRepository, ehrRepository);
+        Mockito.reset(validationService, ehrFolderRepository, compositionRepository, ehrRepository, templateService);
+        Mockito.clearInvocations(spyEhrService);
     }
 
     private EhrService service() {
@@ -112,6 +122,53 @@ class EhrServiceTest {
     private static <T> OriginalVersion<T> originalVersion(Object id, T data) {
         return new OriginalVersion<T>(
                 new ObjectVersionId(id.toString()), null, data, null, null, null, null, null, null);
+    }
+
+    @Test
+    void getSummaryEhrNotFound() {
+
+        UUID ehrId = UUID.fromString("ec0c0433-182c-4d51-88f1-46ff38d88aba");
+        doReturn(false).when(spyEhrService).hasEhr(ehrId);
+
+        assertThatThrownBy(() -> service().getSummary(ehrId))
+                .isInstanceOf(ObjectNotFoundException.class)
+                .hasMessage("EHR with id ec0c0433-182c-4d51-88f1-46ff38d88aba not found");
+        verify(compositionRepository, never()).summarize(ehrId);
+    }
+
+    @Test
+    void getSummary() {
+
+        UUID ehrId = UUID.fromString("a7b8d1a5-7216-47db-9f56-55ba4d0999b8");
+        UUID knownTemplateUuid = UUID.fromString("04debc50-2f24-4e84-9a1c-b381b99957c3");
+        UUID unknownTemplateUuid = UUID.fromString("14debc50-2f24-4e84-9a1c-b381b99957c3");
+        OffsetDateTime lastModified = OffsetDateTime.parse("2026-11-03T10:15:30Z");
+
+        doReturn(true).when(spyEhrService).hasEhr(ehrId);
+        doReturn(new EhrCompositionStats(2, lastModified, List.of(knownTemplateUuid, unknownTemplateUuid)))
+                .when(compositionRepository)
+                .summarize(ehrId);
+        doReturn("vital_signs.v1").when(templateService).findTemplateIdByUuid(knownTemplateUuid);
+        doReturn(null).when(templateService).findTemplateIdByUuid(unknownTemplateUuid);
+
+        EhrSummary summary = service().getSummary(ehrId);
+
+        assertThat(summary).isEqualTo(new EhrSummary(ehrId, 2, lastModified, List.of("vital_signs.v1")));
+        InOrder order = inOrder(spyEhrService, compositionRepository);
+        order.verify(spyEhrService).checkEhrExists(ehrId);
+        order.verify(compositionRepository).summarize(ehrId);
+    }
+
+    @Test
+    void getSummaryWithNoCompositions() {
+
+        UUID ehrId = UUID.fromString("b7b8d1a5-7216-47db-9f56-55ba4d0999b8");
+        doReturn(true).when(spyEhrService).hasEhr(ehrId);
+        doReturn(new EhrCompositionStats(0, null, List.of()))
+                .when(compositionRepository)
+                .summarize(ehrId);
+
+        assertThat(service().getSummary(ehrId)).isEqualTo(new EhrSummary(ehrId, 0, null, List.of()));
     }
 
     @Test

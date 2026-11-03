@@ -27,6 +27,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.ehrbase.api.dto.EhrSummary;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 
@@ -128,6 +129,25 @@ public interface EhrApiSpecification {
                     url = "https://specifications.openehr.org/releases/ITS-REST/latest/ehr.html#tag/EHR/operation/ehr_get_by_id"
             ))
     ResponseEntity<Ehr> getEhrById(String ehrIdString);
+
+    @Operation(
+            summary = "Get EHR summary",
+            description = "EHRbase extension returning a summary of live compositions and their templates.",
+            responses = {
+                    @ApiResponse(
+                            responseCode = "200",
+                            description = "OK, the EHR summary is returned.",
+                            content = {
+                                    @Content(
+                                            mediaType = MediaType.APPLICATION_JSON_VALUE,
+                                            schema = @Schema(implementation = EhrSummary.class))
+                            }),
+                    @ApiResponse(
+                            responseCode = "404",
+                            description = "Not Found, is returned when an EHR with <code>ehr_id</code> does not exist.",
+                            content = @Content(schema = @Schema(hidden = true)))
+            })
+    ResponseEntity<EhrSummary> getEhrSummary(String ehrIdString);
 
     @Operation(
             summary = "Get EHR summary by subject id and namespace",

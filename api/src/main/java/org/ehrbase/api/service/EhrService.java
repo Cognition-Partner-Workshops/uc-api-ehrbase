@@ -26,11 +26,21 @@ import com.nedap.archie.rm.support.identification.ObjectVersionId;
 import java.time.OffsetDateTime;
 import java.util.Optional;
 import java.util.UUID;
+import org.ehrbase.api.dto.EhrSummary;
 import org.ehrbase.api.exception.ObjectNotFoundException;
 import org.ehrbase.api.exception.StateConflictException;
 import org.ehrbase.api.exception.ValidationException;
 
 public interface EhrService {
+
+    /**
+     * Gets a summary of the live compositions in the given EHR.
+     *
+     * @param ehrId EHR ID
+     * @return EHR summary
+     * @throws ObjectNotFoundException if no EHR is found
+     */
+    EhrSummary getSummary(UUID ehrId);
 
     /**
      * Creates new EHR instance, with default settings and values when no status or ID is supplied.
