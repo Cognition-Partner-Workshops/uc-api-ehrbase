@@ -29,11 +29,14 @@ import com.nedap.archie.rm.generic.RevisionHistory;
 import com.nedap.archie.rm.support.identification.HierObjectId;
 import com.nedap.archie.rm.support.identification.ObjectRef;
 import java.time.OffsetDateTime;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
 import org.ehrbase.api.service.SystemService;
+import org.ehrbase.api.service.TemplateService;
 import org.ehrbase.api.util.LocatableUtils;
 import org.ehrbase.jooq.pg.enums.ContributionChangeType;
 import org.ehrbase.jooq.pg.tables.CompVersion;
@@ -48,6 +51,7 @@ import org.jooq.DSLContext;
 import org.jooq.Record1;
 import org.jooq.Table;
 import org.jooq.TableField;
+import org.jooq.impl.DSL;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -56,11 +60,19 @@ public class CompositionRepository
         extends AbstractVersionedObjectRepository<
                 CompVersionRecord, CompDataRecord, CompVersionHistoryRecord, Composition, Void> {
 
+    /**
+     * Aggregated statistics of the live (head) compositions of an EHR.
+     */
+    public record EhrCompositionStats(long compositionCount, OffsetDateTime lastModified, List<String> templateIds) {}
+
+    private final TemplateService templateService;
+
     public CompositionRepository(
             DSLContext context,
             ContributionRepository contributionRepository,
             SystemService systemService,
-            TimeProvider timeProvider) {
+            TimeProvider timeProvider,
+            TemplateService templateService) {
         super(
                 AuditDetailsTargetType.COMPOSITION,
                 COMP_VERSION,
@@ -70,6 +82,7 @@ public class CompositionRepository
                 contributionRepository,
                 systemService,
                 timeProvider);
+        this.templateService = templateService;
     }
 
     @Override
@@ -237,6 +250,27 @@ public class CompositionRepository
                         .limit(1))
                 .limit(1)
                 .fetchOptional(Record1::value1);
+    }
+
+    public EhrCompositionStats summarize(UUID ehrId) {
+        var stats = context.select(
+                        DSL.count(),
+                        DSL.max(COMP_VERSION.SYS_PERIOD_LOWER),
+                        DSL.arrayAggDistinct(COMP_VERSION.TEMPLATE_ID))
+                .from(COMP_VERSION)
+                .where(COMP_VERSION.EHR_ID.eq(ehrId))
+                .fetchSingle();
+
+        UUID[] templateUuids = stats.value3();
+        List<String> templateIds = templateUuids == null
+                ? List.of()
+                : Arrays.stream(templateUuids)
+                        .map(templateService::findTemplateIdByUuid)
+                        .filter(Objects::nonNull)
+                        .sorted()
+                        .toList();
+
+        return new EhrCompositionStats(stats.value1(), stats.value2(), templateIds);
     }
 
     public Optional<UUID> findEHRforComposition(UUID compId) {

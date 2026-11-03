@@ -33,6 +33,7 @@ import com.nedap.archie.rm.support.identification.PartyRef;
 import java.time.OffsetDateTime;
 import java.util.Optional;
 import java.util.UUID;
+import org.ehrbase.api.dto.EhrSummary;
 import org.ehrbase.api.exception.InternalServerException;
 import org.ehrbase.api.exception.ObjectNotFoundException;
 import org.ehrbase.api.exception.StateConflictException;
@@ -270,6 +271,13 @@ public class EhrServiceImp implements EhrService {
     @Override
     public String getSubjectExtRef(UUID ehrId) {
         return ehrRepository.getSubjectExternalRef(ehrId);
+    }
+
+    @Override
+    public EhrSummary getSummary(UUID ehrId) {
+        checkEhrExists(ehrId);
+        CompositionRepository.EhrCompositionStats stats = compositionRepository.summarize(ehrId);
+        return new EhrSummary(ehrId, stats.compositionCount(), stats.lastModified(), stats.templateIds());
     }
 
     @Override
